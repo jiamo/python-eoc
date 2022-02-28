@@ -349,7 +349,7 @@ def make_begin(bs, e):
 # A lambda expression whose parameters are annotated with types.
 @dataclass
 class AnnLambda(expr):
-    params : List[tuple[str,Type]]
+    params : list[tuple[str,Type]]
     returns : Type
     body : expr
     __match_args__ = ("params", "returns", "body")
