@@ -630,7 +630,7 @@ def compile_and_test(compiler, compiler_name,
     with open(program_filename) as source:
         program = parse(source.read())
 
-    breakpoint()
+    # breakpoint()
     trace('\n# source program\n')
     trace(program)
     trace('')
