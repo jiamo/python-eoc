@@ -572,7 +572,7 @@ def label_name(n: str) -> str:
     else:
         return n
     
-tracing = False
+tracing = True
 
 def enable_tracing():
     global tracing
@@ -630,6 +630,7 @@ def compile_and_test(compiler, compiler_name,
     with open(program_filename) as source:
         program = parse(source.read())
 
+    breakpoint()
     trace('\n# source program\n')
     trace(program)
     trace('')
@@ -847,6 +848,7 @@ def compile(compiler, compiler_name, type_check_P, type_check_C,
     with open(program_filename) as source:
         program = parse(source.read())
 
+    print("parsed prgram:\n", program, "\n....\n")
     trace('\n# type check\n')        
     type_check_P(program)
     trace_ast_and_concrete(program)

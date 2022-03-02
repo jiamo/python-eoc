@@ -21,7 +21,7 @@ def interp_stmt(s):
         case Expr(value):
             interp_exp(value)
 
-def interp_P(p):
+def interp_Pint(p):
     match p:
         case Module(body):
             for s in body:
