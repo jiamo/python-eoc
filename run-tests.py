@@ -2,16 +2,19 @@ import os
 import sys
 import compiler
 import interp_Pvar
+import interp_Lvar
 import type_check_Pvar
+import type_check_Lvar
 from utils import run_tests, run_one_test
 
 
 compiler = compiler.Compiler()
 type_check_dict = {
-    "var": type_check_Pvar
+    "var": type_check_Lvar.TypeCheckLvar().type_check
 }
 interp_dict = {
-    "var": interp_Pvar
+    "var": interp_Lvar.InterpLvar().interp,
+    "remove_complex_operands": interp_Lvar.InterpLvar().interp
 }
 
 if len(sys.argv) == 2:

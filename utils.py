@@ -594,6 +594,8 @@ def is_python_extension(filename):
 # expected "golden" output.
 def test_pass(passname, interp_dict, program_root, ast,
               compiler_name):
+    trace("ast {}".format(ast))
+    # breakpoint()
     if passname in interp_dict.keys():
         input_file = program_root + '.in'
         output_file = program_root + '.out'
@@ -744,8 +746,10 @@ def compile_and_test(compiler, compiler_name,
         
     passname = 'remove_complex_operands'
     trace('\n# ' + passname + '\n')
+    # breakpoint()
     program = compiler.remove_complex_operands(program)
     trace(program)
+    # breakpoint()
     if passname in type_check_dict.keys():
         type_check_dict[passname](program)
     total_passes += 1

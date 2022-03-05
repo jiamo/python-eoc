@@ -25,17 +25,25 @@ class Compiler:
                 print(left, op, right)
                 l_expr, l_tmps = self.rco_exp(left, True)
                 r_expr, r_tmps = self.rco_exp(right, True)
-                tmp = Name(generate_name("tmp"))
                 l_tmps.extend(r_tmps)
-                l_tmps.append((tmp, BinOp(l_expr, op, r_expr)))
-                return tmp, l_tmps
+                return_expr = BinOp(l_expr, op, r_expr)
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    l_tmps.append((tmp, return_expr))
+                    return tmp, l_tmps
+                else:
+                    return return_expr, l_tmps
             case UnaryOp(USub(), v):
                 # one by one
                 v_expr, v_tmps = self.rco_exp(v, True)
                 print(v_expr, v_tmps)
-                tmp = Name(generate_name("tmp"))
-                v_tmps.append((tmp, UnaryOp(USub(), v_expr)))
-                return tmp, v_tmps
+                return_expr = UnaryOp(USub(), v_expr)
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    v_tmps.append((tmp, return_expr))
+                    return tmp, v_tmps
+                else:
+                    return return_expr, v_tmps
             case Constant(value):
                 return e, []
             case Call(Name('input_int'), []):
@@ -51,16 +59,16 @@ class Compiler:
                 arg_expr, arg_tmps = self.rco_exp(arg, True)
                 for name, expr in arg_tmps:
                     result.append(Assign([name], expr))
-                result.append(Call(Name('print'), [arg_expr]))
+                result.append(Expr(Call(Name('print'), [arg_expr])))
             case Expr(value):
-                expr, tmps = self.rco_exp(value, True)
+                expr, tmps = self.rco_exp(value, False)
                 print(expr, tmps)
                 for name, expr in tmps:
                     result.append(Assign([name], expr))
                 result.append(Expr(expr))
 
             case Assign([lhs], value):
-                v_expr, tmps = self.rco_exp(value, True)
+                v_expr, tmps = self.rco_exp(value, False)
                 print(v_expr, tmps)
                 for name, t_expr in tmps:
                     result.append(Assign([name], t_expr))
@@ -71,14 +79,20 @@ class Compiler:
 
     def remove_complex_operands(self, p: Module) -> Module:
         # YOUR CODE HERE
+        trace(p)
+        result = []
         match p:
             case Module(body):
                 print(body)
-                result = Module([self.rco_stmt(s) for s in body])
+                # breakpoint()
+                for s in body:
+                    result.extend(self.rco_stmt(s))
+                result = Module(result)
             case _:
                 raise Exception('interp: unexpected ' + repr(p))
 
-        breakpoint()
+        # breakpoint()
+        trace(result)
         return result
     ############################################################################
     # Select Instructions
