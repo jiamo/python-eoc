@@ -14,8 +14,10 @@ def interp_exp(e):
         case Call(Name('input_int'), []):
             return int(input())            
 
+
 def interp_stmt(s):
     match s:
+
         case Expr(Call(Name('print'), [arg])):
             print(interp_exp(arg))
         case Expr(value):

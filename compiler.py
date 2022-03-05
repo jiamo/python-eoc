@@ -19,49 +19,67 @@ class Compiler:
     def rco_exp(self, e: expr, need_atomic: bool) -> Tuple[expr, Temporaries]:
         # YOUR CODE HERE
         match e:
-            case BinOp(left, Add(), right):
-                l = interp_exp(left); r = interp_exp(right)
-                return l + r
-            case BinOp(left, Sub(), right):
-                l = interp_exp(left); r = interp_exp(right)
-                return l - r
+            case Name(id):
+                return e, []
+            case BinOp(left, op, right):
+                print(left, op, right)
+                l_expr, l_tmps = self.rco_exp(left, True)
+                r_expr, r_tmps = self.rco_exp(right, True)
+                tmp = Name(generate_name("tmp"))
+                l_tmps.extend(r_tmps)
+                l_tmps.append((tmp, BinOp(l_expr, op, r_expr)))
+                return tmp, l_tmps
             case UnaryOp(USub(), v):
-                return - interp_exp(v)
+                # one by one
+                v_expr, v_tmps = self.rco_exp(v, True)
+                print(v_expr, v_tmps)
+                tmp = Name(generate_name("tmp"))
+                v_tmps.append((tmp, UnaryOp(USub(), v_expr)))
+                return tmp, v_tmps
             case Constant(value):
-                return value
+                return e, []
             case Call(Name('input_int'), []):
-                return int(input())
+                return e, []  # beachse match e was
             case _:
-                raise Exception('error in interp_exp, unexpected ' + repr(e))
+                raise Exception('error in rco_exp, unexpected ' + repr(e))
     
     def rco_stmt(self, s: stmt) -> List[stmt]:
         # YOUR CODE HERE
         result = []
         match s:
+            case Expr(Call(Name('print'), [arg])):
+                arg_expr, arg_tmps = self.rco_exp(arg, True)
+                for name, expr in arg_tmps:
+                    result.append(Assign([name], expr))
+                result.append(Call(Name('print'), [arg_expr]))
             case Expr(value):
-                expr, tmps = self.interp_exp(value)
+                expr, tmps = self.rco_exp(value, True)
+                print(expr, tmps)
                 for name, expr in tmps:
                     result.append(Assign([name], expr))
-                result.append(expr)
+                result.append(Expr(expr))
+
             case Assign([lhs], value):
-                pass
+                v_expr, tmps = self.rco_exp(value, True)
+                print(v_expr, tmps)
+                for name, t_expr in tmps:
+                    result.append(Assign([name], t_expr))
+                result.append(Assign([lhs], v_expr))
             case _:
-                return super().interp_stmts(ss, env)
-                
+                raise Exception('error in rco_stmt, unexpected ' + repr(e))
+        return result
 
     def remove_complex_operands(self, p: Module) -> Module:
         # YOUR CODE HERE
         match p:
             case Module(body):
-                breakpoint() # using extend
-                new_body = []
-                for s in body:
-                    new_body.extend(self.rco_exp)
-                return Module([self.rco_stmt(s) for s in body])
+                print(body)
+                result = Module([self.rco_stmt(s) for s in body])
             case _:
                 raise Exception('interp: unexpected ' + repr(p))
-        
 
+        breakpoint()
+        return result
     ############################################################################
     # Select Instructions
     ############################################################################
