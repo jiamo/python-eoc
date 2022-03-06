@@ -5,6 +5,7 @@ import interp_Pvar
 import interp_Lvar
 import type_check_Pvar
 import type_check_Lvar
+from interp_x86.eval_x86 import interp_x86
 from utils import run_tests, run_one_test
 
 
@@ -14,7 +15,8 @@ type_check_dict = {
 }
 interp_dict = {
     "var": interp_Lvar.InterpLvar().interp,
-    "remove_complex_operands": interp_Lvar.InterpLvar().interp
+    "remove_complex_operands": interp_Lvar.InterpLvar().interp,
+    "select_instructions": interp_x86
 }
 
 if len(sys.argv) == 2:

@@ -100,15 +100,87 @@ class Compiler:
 
     def select_arg(self, e: expr) -> arg:
         # YOUR CODE HERE
-        pass        
+        match e:
+            case Name(name):
+                return Variable(name)
+            case Constant(value):
+                return Immediate(value)
+            case _:
+                raise Exception('error in rco_exp, unexpected ' + repr(e))
 
     def select_stmt(self, s: stmt) -> List[instr]:
         # YOUR CODE HERE
+        result = []
+        match s:
+            case Expr(Call(Name('print'), [arg])):
+                arg = self.select_arg(arg)
+                result.append(Instr('movq', [arg, Reg("rdi")]))
+                result.append(Callq(label_name("print_int"), 1))
+            case Expr(value):
+                # don't need do more on value
+                result.append(Instr('movq', [value, Reg("rax")]))
+            case Assign([lhs], BinOp(left, Add(), right)):
+                # breakpoint()
+                left_arg = self.select_arg(left)
+                right_arg = self.select_arg(right)
+                lhs = self.select_arg(lhs)
+                if lhs == left_arg:
+                    result.append(Instr('addq', [right_arg, lhs]))
+                elif lhs == right_arg:
+                    result.append(Instr('addq', [left_arg, lhs]))
+                else:
+                    result.append(Instr('movq', [left_arg, lhs]))
+                    result.append(Instr('addq', [right_arg, lhs]))
+            case Assign([lhs], BinOp(left, Sub(), right)):
+                # breakpoint()
+                left_arg = self.select_arg(left)
+                right_arg = self.select_arg(right)
+                lhs = self.select_arg(lhs)
+                if lhs == left_arg:
+                    result.append(Instr('subq', [right_arg, lhs]))
+                elif lhs == right_arg:
+                    result.append(Instr('subq', [left_arg, lhs]))
+                else:
+                    result.append(Instr('movq', [left_arg, lhs]))
+                    result.append(Instr('subq', [right_arg, lhs]))
+            case Assign([lhs], UnaryOp(USub(), v)):
+                arg = self.select_arg(v)
+                lhs = self.select_arg(lhs)
+                if arg == lhs:
+                    result.append(Instr('negq', [lhs]))
+                else:
+                    result.append(Instr('movq', [arg, lhs]))
+                    result.append(Instr('negq', [lhs]))
+            case Assign([lhs], Call(Name('input_int'), [])):
+                lhs = self.select_arg(lhs)
+                result.append(Callq(label_name("read_int"), 0))
+                result.append(Instr('movq', [Reg('rax'), lhs]))
+            case Assign([lhs], value):
+                lhs = self.select_arg(lhs)
+                arg = self.select_arg(value)
+                result.append(Instr('movq', [arg, lhs]))
+            case _:
+                raise Exception('error in rco_stmt, unexpected ' + repr(s))
+        return result
         pass        
 
     def select_instructions(self, p: Module) -> X86Program:
         # YOUR CODE HERE
-        pass        
+
+        instr_body = []
+        match p:
+            case Module(body):
+                print(body)
+                # breakpoint()
+                for s in body:
+                    instr_body.extend(self.select_stmt(s))
+            case _:
+                raise Exception('interp: unexpected ' + repr(p))
+
+
+        x86 = X86Program(instr_body)
+        # breakpoint()
+        return x86
 
     ############################################################################
     # Assign Homes
