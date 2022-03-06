@@ -278,5 +278,23 @@ class Compiler:
 
     def prelude_and_conclusion(self, p: X86Program) -> X86Program:
         # YOUR CODE HERE
-        pass        
+        result = []
+
+        match (p):
+            case X86Program(body):
+                result.extend([
+                    Instr("pushq", [Reg("rbp")]),
+                    Instr("movq", [Reg("rsp"), Reg("rbp")]),
+                    Instr("subq", [Immediate(16), Reg("rsp")]),
+                ])
+                result.extend(body)
+                result.extend([
+                    Instr("addq", [Immediate(16), Reg("rsp")]),
+                    Instr("popq", [Reg("rbp")]),
+                    Instr("retq", []),
+                ])
+
+
+        # breakpoint()
+        return X86Program(result)
 

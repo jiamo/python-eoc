@@ -821,7 +821,7 @@ def compile_and_test(compiler, compiler_name,
         sys.stdin = stdin
         sys.stdout = stdout
     else:
-        os.system('gcc runtime.o ' + x86_filename)
+        os.system('gcc -g -std=c99 runtime.o ' + x86_filename)
         input_file = program_root + '.in'
         output_file = program_root + '.out'
         os.system('./a.out < ' + input_file + ' > ' + output_file)
