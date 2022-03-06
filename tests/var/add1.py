@@ -1,2 +1,3 @@
-x = 42 - 10
-print(x + 10)
+a = 42
+b = a
+print(b)

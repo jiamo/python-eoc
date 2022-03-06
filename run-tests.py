@@ -16,7 +16,9 @@ type_check_dict = {
 interp_dict = {
     "var": interp_Lvar.InterpLvar().interp,
     "remove_complex_operands": interp_Lvar.InterpLvar().interp,
-    "select_instructions": interp_x86
+    "select_instructions": interp_x86,
+    "assign_homes": interp_x86,
+    "patch_instructions": interp_x86,
 }
 
 if len(sys.argv) == 2:

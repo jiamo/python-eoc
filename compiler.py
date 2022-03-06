@@ -5,6 +5,7 @@ from utils import *
 from x86_ast import *
 import os
 from typing import List, Tuple, Set, Dict
+from interp_x86.eval_x86 import interp_x86
 
 Binding = Tuple[Name, expr]
 Temporaries = List[Binding]
@@ -180,6 +181,9 @@ class Compiler:
 
         x86 = X86Program(instr_body)
         # breakpoint()
+        # print("......")
+        # interp_x86(x86)
+        # print("......")
         return x86
 
     ############################################################################
@@ -187,38 +191,86 @@ class Compiler:
     ############################################################################
 
     def assign_homes_arg(self, a: arg, home: Dict[Variable, arg]) -> arg:
-        # YOUR CODE HERE
+        match a:
+            case Variable(name):
+                if a in home:
+                    return home[a]
+                index = len(home) + 1
+                location = -(index * 8)
+                arg = Deref("rbp", location)
+                home[a] = arg
+                return arg
+            case Immediate(value):
+                return a
+            case Reg(value):
+                return a
+            case _:
+                raise Exception('error in assign_homes_arg, unexpected ' + repr(a))
         pass        
 
     def assign_homes_instr(self, i: instr,
-                           home: Dict[location, arg]) -> instr:
-        # YOUR CODE HERE
+                           home: Dict[Variable, arg]) -> instr:
+        match(i):
+            case Instr(instr, args):
+                new_args = []
+                for arg in args:
+                    new_args.append(self.assign_homes_arg(arg, home))
+                return Instr(instr, new_args)
+            case Callq(func, num_args):
+                return i
+            case _:
+                raise Exception('error in assign_homes_instr, unexpected ' + repr(i))
         pass        
 
     def assign_homes_instrs(self, ss: List[instr],
-                            home: Dict[location, arg]) -> List[instr]:
-        # YOUR CODE HERE
-        pass        
+                            home: Dict[Variable, arg]) -> List[instr]:
+        result = []
+        for s in ss:
+            ns = self.assign_homes_instr(s, home)
+            result.append(ns)
+        return result
 
     def assign_homes(self, p: X86Program) -> X86Program:
         # YOUR CODE HERE
-        pass        
+        match(p):
+            case X86Program(body):
+                home = {}
+                result = self.assign_homes_instrs(body, home)
+        # breakpoint()
+        return X86Program(result)
 
     ############################################################################
     # Patch Instructions
     ############################################################################
 
     def patch_instr(self, i: instr) -> List[instr]:
-        # YOUR CODE HERE
+        match(i):
+            case Instr(instr, [Deref("rbp", x), Deref("rbp", y)]):
+                return [
+                    Instr("movq", [Deref("rbp", x), Reg("rax")]),
+                    Instr("movq", [Reg("rax"), Deref("rbp", y)])
+                ]
+            case Instr(instr, args):
+                return [i]
+            case Callq(func, num_args):
+                return [i]
+            case _:
+                raise Exception('error in assign_homes_instr, unexpected ' + repr(i))
         pass        
 
     def patch_instrs(self, ss: List[instr]) -> List[instr]:
-        # YOUR CODE HERE
-        pass        
+        result = []
+        for s in ss:
+            ns = self.patch_instr(s)
+            result.extend(ns)
+        return result
 
     def patch_instructions(self, p: X86Program) -> X86Program:
-        # YOUR CODE HERE
-        pass        
+        match(p):
+            case X86Program(body):
+                result = self.patch_instrs(body)
+        # breakpoint()
+        return X86Program(result)
 
     ############################################################################
     # Prelude & Conclusion
