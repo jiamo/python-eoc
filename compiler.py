@@ -356,7 +356,11 @@ class Compiler:
         result = []
         self.color_regs = [Reg("rbx"), Reg("rcx"), Reg("rdx"), Reg("rsi"), Reg("rdi"), Reg("r8"), Reg("r9"), Reg("r10")]
         self.color_regs = [Reg("rbx"), Reg("rcx")]
+        self.color_regs = [Reg("rbx")]
+        self.color_regs = [Reg("rcx")]
 
+        self.alloc_callee_saved_regs = list(set(self.color_regs).intersection(callee_saved_regs))
+        self.C = len(self.alloc_callee_saved_regs)
         # used_regs = 1
         color_regs_map = {i:reg for i, reg in enumerate(self.color_regs)}
         self.real_color_map = {}
@@ -375,7 +379,7 @@ class Compiler:
                         self.real_color_map[color] = color_regs_map[color]
                     else:
                         # Yes
-                        self.real_color_map[color] = Deref("rbp", -8*(color-self.S + 1))
+                        self.real_color_map[color] = Deref("rbp", -8*(color-len(self.color_regs) + self.C + 1))
 
                 print("real_color_map", self.real_color_map)
 
@@ -397,9 +401,6 @@ class Compiler:
         # breakpoint()
         # breakpoint()
 
-
-        self.alloc_callee_saved_regs = list(set(self.color_regs).intersection(callee_saved_regs))
-        self.C = len(self.alloc_callee_saved_regs)
         self.rsp_sub = align(8 * self.S + 8 * self.C, 16) - 8 * self.C
 
         return X86Program(result)
