@@ -83,7 +83,7 @@ class Compiler:
                     result.append(Assign([name], t_expr))
                 result.append(Assign([lhs], v_expr))
             case _:
-                raise Exception('error in rco_stmt, unexpected ' + repr(e))
+                raise Exception('error in rco_stmt, unexpected ' + repr(s))
         return result
 
     def remove_complex_operands(self, p: Module) -> Module:
