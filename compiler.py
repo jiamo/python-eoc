@@ -247,7 +247,7 @@ class Compiler:
     #     # breakpoint()
     #     return X86Program(result)
 
-    def read_var(self, i) -> set:
+    def read_var(self, i: instr) -> Set[location]:
         match (i):
             case Instr(op, [Variable(s), t]):
                 return {i.args[0]}
@@ -262,7 +262,7 @@ class Compiler:
             case _:
                 return set()
 
-    def write_var(self, i) -> set:
+    def write_var(self, i) -> Set[location]:
         match (i):
             case Instr("movq", [s, t]):
                 return {i.args[1]}
@@ -271,8 +271,7 @@ class Compiler:
             case _:
                 return set()
 
-    def uncover_live(self, ss: List[instr]):
-
+    def uncover_live(self, ss: List[instr]) -> Dict[instr, Set[location]]:
 
         pre_instr_set = set()
         pre_instr = ss[-1]
@@ -287,7 +286,7 @@ class Compiler:
         return live_after
 
 
-    def build_interference(self, ss: List[instr]):
+    def build_interference(self, ss: List[instr]) -> UndirectedAdjList:
         live_after = self.uncover_live(ss)
         interference_graph = UndirectedAdjList()
         print("live_after ", live_after)
@@ -311,7 +310,7 @@ class Compiler:
                                 interference_graph.add_edge(d, v)
         return interference_graph
 
-    def color_graph(self, ss: List[instr], k=100):
+    def color_graph(self, ss: List[instr], k=100) -> Dict[location, int]:
         # first make it k big enough
         valid_colors = list(range(0, k))  # number of colar
         color_map = {}
