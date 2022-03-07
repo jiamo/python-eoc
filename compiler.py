@@ -4,11 +4,19 @@ from re import T
 from utils import *
 from x86_ast import *
 import os
+from graph import UndirectedAdjList
+from priority_queue import PriorityQueue
 from typing import List, Tuple, Set, Dict
 from interp_x86.eval_x86 import interp_x86
 
 Binding = Tuple[Name, expr]
 Temporaries = List[Binding]
+
+caller_saved_regs = {Reg('rax'), Reg('rcx'), Reg('rdx'), Reg('rsi'),Reg('rdi'),Reg('r8'),Reg('r9'),
+                    Reg("r10"), Reg('r11')}
+callee_saved_regs = {Reg('rsp'), Reg('rbp'), Reg("rbx"), Reg("r12"), Reg("r13"), Reg("r14"),Reg("r15")}
+arg_regs = [Reg("rdi"), Reg("rsi"), Reg("rdx"), Reg("rcx"), Reg("r8"), Reg("r9")]
+
 
 
 class Compiler:
@@ -230,14 +238,174 @@ class Compiler:
             result.append(ns)
         return result
 
-    def assign_homes(self, p: X86Program) -> X86Program:
+    # def assign_homes(self, p: X86Program) -> X86Program:
+    #     # YOUR CODE HERE
+    #     match(p):
+    #         case X86Program(body):
+    #             home = {}
+    #             result = self.assign_homes_instrs(body, home)
+    #     # breakpoint()
+    #     return X86Program(result)
+
+    def read_var(self, i) -> set:
+        match (i):
+            case Instr(op, [Variable(s), t]):
+                return {i.args[0]}
+            case Instr(op, [Reg(s), t]):
+                return {i.args[0]}
+            case Instr(op, [Variable(s)]):
+                return {i.args[0]}
+            case Instr(op, [Reg(s)]):
+                return {i.args[0]}
+            case Callq(func, num_args):
+                return set(arg_regs[:num_args])
+            case _:
+                return set()
+
+    def write_var(self, i) -> set:
+        match (i):
+            case Instr("movq", [s, t]):
+                return {i.args[1]}
+            case Callq(func, num_args):
+                return set(callee_saved_regs)
+            case _:
+                return set()
+
+    def uncover_live(self, ss: List[instr]):
+
+
+        pre_instr_set = set()
+        pre_instr = ss[-1]
+        live_after = {
+            ss[-1]: set()
+        }
+        for s in list(reversed(ss))[1:]:
+            pre_instr_set = (pre_instr_set - self.write_var(pre_instr)).union(self.read_var(pre_instr))
+            pre_instr = s
+            live_after[s] = pre_instr_set
+
+        return live_after
+
+
+    def build_interference(self, ss: List[instr]):
+        live_after = self.uncover_live(ss)
+        interference_graph = UndirectedAdjList()
+        print("live_after ", live_after)
+        for s in ss:
+            match (s):
+                case Instr("movq", [si, d]):
+                    # si = s.args[0]
+                    for v in live_after[s]:
+                        if v != d and v != si:
+                            interference_graph.add_edge(d, v)
+                # case Instr("movq", [Reg(x), t]):
+                #     si = s.args[0]
+                #     for v in live_after[si]:
+                #         if v != d and v != si:
+                #             interference_graph.add_edge(d, v)
+                case _:
+                    wset = self.write_var(s)
+                    for d in wset:
+                        for v in live_after[s]:
+                            if v != d:
+                                interference_graph.add_edge(d, v)
+        return interference_graph
+
+    def color_graph(self, ss: List[instr], k=100):
+        # first make it k big enough
+        valid_colors = list(range(0, k))  # number of colar
+        color_map = {}
+        saturated = {}
+
+        def less(u, v):
+            nonlocal saturated
+            # breakpoint()
+            if v not in saturated:
+                return True
+            return len(saturated[u]) < len(saturated[v])
+
+        queue = PriorityQueue(less)
+        interference_graph = self.build_interference(ss)
+        # dot = interference_graph.show()
+        # breakpoint()
+        # dot.view()
+        # breakpoint()
+        vsets = interference_graph.vertices()
+        for v in vsets:
+            saturated[v] = set()
+        for v in vsets:
+            queue.push(v)
+
+        while not queue.empty():
+
+            u = queue.pop()
+            print("handing", u)
+            adj_colors = {color_map[v] for v in interference_graph.adjacent(u) if v in color_map}
+            print(u, adj_colors)
+            if left_color := set(valid_colors) - adj_colors:
+                color = min(left_color)
+                color_map[u] = color
+                for v in interference_graph.adjacent(u):
+                    saturated[v].add(color)
+            # else:
+            #     spill.add(u)
+        # breakpoint()
+        return color_map
+
+    def allocate_registers(self, p: X86Program) -> X86Program:
         # YOUR CODE HERE
+        result = []
+        self.color_regs = [Reg("rbx"), Reg("rcx"), Reg("rdx"), Reg("rsi"), Reg("rdi"), Reg("r8"), Reg("r9"), Reg("r10")]
+        self.color_regs = [Reg("rbx"), Reg("rcx")]
+
+        # used_regs = 1
+        color_regs_map = {i:reg for i, reg in enumerate(self.color_regs)}
+        self.real_color_map = {}
+
         match(p):
             case X86Program(body):
-                home = {}
-                result = self.assign_homes_instrs(body, home)
+                color_map = self.color_graph(body)
+                self.S = len(set(color_map.values())) - len(self.color_regs)
+
+                print("color_map", color_map)
+
+                for color in sorted(set(color_map.values())):
+                    if color in self.real_color_map:
+                        continue
+                    if color in color_regs_map:
+                        self.real_color_map[color] = color_regs_map[color]
+                    else:
+                        # Yes
+                        self.real_color_map[color] = Deref("rbp", -8*(color-self.S + 1))
+
+                print("real_color_map", self.real_color_map)
+
+                for s in body:
+                    match(s):
+                        case Instr(op, [source, target]):
+                            if (color := color_map.get(source)) is not None:
+                                source = self.real_color_map[color]
+                            if (color := color_map.get(target)) is not None:
+                                target = self.real_color_map[color]
+                            result.append(Instr(op, [source, target]))
+                        case Instr(op, [source]):
+                            if (color := color_map.get(source)) is not None:
+                                source = self.real_color_map[color]
+                            result.append(Instr(op, [source]))
+                        case _:
+                            result.append(s)
+
         # breakpoint()
+        # breakpoint()
+
+
+        self.alloc_callee_saved_regs = list(set(self.color_regs).intersection(callee_saved_regs))
+        self.C = len(self.alloc_callee_saved_regs)
+        self.rsp_sub = align(8 * self.S + 8 * self.C, 16) - 8 * self.C
+
         return X86Program(result)
+
+
 
     ############################################################################
     # Patch Instructions
@@ -245,6 +413,8 @@ class Compiler:
 
     def patch_instr(self, i: instr) -> List[instr]:
         match(i):
+            case Instr(instr, [x, y]) if x == y:
+                return []
             case Instr(instr, [Deref("rbp", x), Deref("rbp", y)]):
                 return [
                     Instr("movq", [Deref("rbp", x), Reg("rax")]),
@@ -280,16 +450,31 @@ class Compiler:
         # YOUR CODE HERE
         result = []
 
+
+        # The spilled variables must b placed lower on the stackthan the saved callee
+        # because there is rsp betweent it
+        extra_saved_regs = list(set(self.alloc_callee_saved_regs) - {Reg("rbp")})
+        # breakpoint()
         match (p):
             case X86Program(body):
                 result.extend([
                     Instr("pushq", [Reg("rbp")]),
                     Instr("movq", [Reg("rsp"), Reg("rbp")]),
-                    Instr("subq", [Immediate(16), Reg("rsp")]),
+
                 ])
+                # save
+                for reg in extra_saved_regs:
+                    result.append(Instr("pushq", [reg]))
+                result.extend([ Instr("subq", [Immediate(self.rsp_sub), Reg("rsp")])])
+
                 result.extend(body)
+                result.extend([ Instr("addq", [Immediate(self.rsp_sub), Reg("rsp")]),])
+
+                # recover
+                for reg in extra_saved_regs[::-1]:
+                    result.append(Instr("popq", [reg]))
+
                 result.extend([
-                    Instr("addq", [Immediate(16), Reg("rsp")]),
                     Instr("popq", [Reg("rbp")]),
                     Instr("retq", []),
                 ])

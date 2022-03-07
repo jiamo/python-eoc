@@ -774,6 +774,7 @@ def compile_and_test(compiler, compiler_name,
         
     passname = 'select_instructions'
     trace('\n# ' + passname + '\n')
+
     program = compiler.select_instructions(program)
     trace(program)
     total_passes += 1
@@ -781,14 +782,27 @@ def compile_and_test(compiler, compiler_name,
         test_pass(passname, interp_dict, program_root, program,
                   compiler_name)
 
+
+    # TODO assign_homes will be repalce by register_alloc
     passname = 'assign_homes'
-    trace('\n# ' + passname + '\n')    
-    program = compiler.assign_homes(program)
-    trace(program)
-    total_passes += 1
-    successful_passes += \
-        test_pass(passname, interp_dict, program_root, program,
-                  compiler_name)
+    if hasattr(compiler, passname):
+        trace('\n# ' + passname + '\n')
+        program = compiler.assign_homes(program)
+        trace(program)
+        total_passes += 1
+        successful_passes += \
+            test_pass(passname, interp_dict, program_root, program,
+                      compiler_name)
+
+    passname = 'allocate_registers'
+    if hasattr(compiler, passname):
+        trace('\n# ' + passname + '\n')
+        program = compiler.allocate_registers(program)
+        trace(program)
+        total_passes += 1
+        successful_passes += \
+            test_pass(passname, interp_dict, program_root, program,
+                      compiler_name)
 
     passname = 'patch_instructions'
     trace('\n# ' + passname + '\n')        
