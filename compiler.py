@@ -25,6 +25,83 @@ class Compiler:
     # Remove Complex Operands
     ############################################################################
 
+    def shrink_exp(self, e: expr) -> expr:
+        # YOUR CODE HERE
+        # breakpoint()
+        match e:
+            case BoolOp(And(), expr):
+                return IfExp(expr[0], expr[1], Constant(False))
+            case BoolOp(Or(), expr):
+                return IfExp(expr[0], Constant(True), expr[1])
+            case _:
+                return e
+            # case Name(id):
+            #     return e, []
+            # case BinOp(left, op, right):
+            #     print(left, op, right)
+            #     l_expr, l_tmps = self.rco_exp(left, True)
+            #     r_expr, r_tmps = self.rco_exp(right, True)
+            #     l_tmps.extend(r_tmps)
+            #     return_expr = BinOp(l_expr, op, r_expr)
+            #     if need_atomic:
+            #         tmp = Name(generate_name("tmp"))
+            #         l_tmps.append((tmp, return_expr))
+            #         return tmp, l_tmps
+            #     else:
+            #         return return_expr, l_tmps
+            # case UnaryOp(USub(), v):
+            #     # one by one
+            #     v_expr, v_tmps = self.rco_exp(v, True)
+            #     print(v_expr, v_tmps)
+            #     return_expr = UnaryOp(USub(), v_expr)
+            #     if need_atomic:
+            #         tmp = Name(generate_name("tmp"))
+            #         v_tmps.append((tmp, return_expr))
+            #         return tmp, v_tmps
+            #     else:
+            #         return return_expr, v_tmps
+            # case Constant(value):
+            #     return e, []
+            # case Call(Name('input_int'), []):
+            #     return e, []  # beachse match e was
+            # case _:
+            #     raise Exception('error in rco_exp, unexpected ' + repr(e))
+
+    def shrink_stmt(self, s: stmt) -> stmt:
+        # YOUR CODE HERE
+        match s:
+            case Expr(Call(Name('print'), [arg])):
+                arg_expr = self.shrink_exp(arg)
+                result = Expr(Call(Name('print'), [arg_expr]))
+            case Expr(value):
+                s_value = self.shrink_exp(value)
+                result= Expr(s_value)
+            case Assign([lhs], value):
+                s_value = self.shrink_exp(value)
+                result = Assign([lhs], s_value)
+            case _:
+                raise Exception('error in rco_stmt, unexpected ' + repr(s))
+        return result
+
+    def shrink(self, p: Module) -> Module:
+        # YOUR CODE HERE
+        trace(p)
+        result = []
+        match p:
+            case Module(body):
+                print(body)
+                # breakpoint()
+                for s in body:
+                    result.append(self.shrink_stmt(s))
+                result = Module(result)
+            case _:
+                raise Exception('interp: unexpected ' + repr(p))
+
+        # breakpoint()
+        trace(result)
+        return result
+
+
     def rco_exp(self, e: expr, need_atomic: bool) -> Tuple[expr, Temporaries]:
         # YOUR CODE HERE
         match e:
