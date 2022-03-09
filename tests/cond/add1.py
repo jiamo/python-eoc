@@ -1,3 +1,6 @@
-e1 = True
-e2 = False
-a = e1 and e2
+x = 42
+y = 0
+if x > 0:
+    print(x)
+else:
+    print(y)

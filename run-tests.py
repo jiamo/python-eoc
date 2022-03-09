@@ -6,6 +6,7 @@ import interp_Lvar
 import interp_Lif
 import type_check_Pvar
 import type_check_Lvar
+import interp_Cif
 import type_check_Lif
 
 from interp_x86.eval_x86 import interp_x86
@@ -22,6 +23,7 @@ interp_dict = {
     "cond": interp_Lif.InterpLif().interp,
     "shrink": interp_Lif.InterpLif().interp,
     "remove_complex_operands": interp_Lif.InterpLif().interp,
+    "explicate_control": interp_Cif.InterpCif().interp,
     "select_instructions": interp_x86,
     "assign_homes": interp_x86,
     "patch_instructions": interp_x86,
@@ -31,15 +33,15 @@ interp_dict = {
 
 if len(sys.argv) == 2:
     one_test_file = sys.argv[1]
-    run_one_test(one_test_file, 'var',
-                 compiler, 'var',
+    run_one_test(one_test_file, 'cond',
+                 compiler, 'cond',
                  #type_check_Pvar.TypeCheckPvar().type_check_P,
                  type_check_dict,
                  # interp_Pvar.InterpPvar().interp_P,
                  interp_dict,
                  )
 else:
-    run_tests('var', compiler, 'var',
+    run_tests('cond', compiler, 'cond',
               # type_check_Pvar.TypeCheckPvar().type_check_P,
               type_check_dict,
               # interp_Pvar.InterpPvar().interp_P,

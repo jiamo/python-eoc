@@ -986,3 +986,9 @@ def run_tests(lang, compiler, compiler_name, type_check_dict, interp_dict):
           + ' for compiler ' + compiler_name + ' on language ' + lang)
     print('passes: ' + repr(successful_passes) + '/' + repr(total_passes) \
           + ' for compiler ' + compiler_name + ' on language ' + lang)
+
+
+def create_block(stmts, basic_blocks):
+    label = label_name(generate_name('block'))
+    basic_blocks[label] = stmts
+    return Goto(label)
