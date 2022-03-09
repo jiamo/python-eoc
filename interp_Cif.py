@@ -7,6 +7,8 @@ class InterpCif(InterpLif):
   def interp_stmts(self, ss, env):
     if len(ss) == 0:
         return
+    trace("trace {}".format(ss[0]))
+
     match ss[0]:
       case Return(value):
         return self.interp_exp(value, env)

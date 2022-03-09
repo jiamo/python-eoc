@@ -6,6 +6,7 @@ from x86_ast import *
 import os
 from graph import UndirectedAdjList
 from priority_queue import PriorityQueue
+import interp_Cif
 from typing import List, Tuple, Set, Dict
 from interp_x86.eval_x86 import interp_x86
 
@@ -229,17 +230,20 @@ class Compiler:
         match rhs:
             case IfExp(test, body, orelse):
                 goto_cont = create_block(cont, basic_blocks)
-                body = self.explicate_assign(body, lhs, [goto_cont], basic_blocks)
-                orelse = self.explicate_assign(orelse, lhs, [goto_cont], basic_blocks)
-                return self.explicate_pred(test, body, orelse, basic_blocks)
+                body_list = self.explicate_assign(body, lhs, [goto_cont], basic_blocks)
+                orelse_list = self.explicate_assign(orelse, lhs, [goto_cont], basic_blocks)
+                return self.explicate_pred(test, body_list, orelse_list, basic_blocks)
 
             case Begin(body, result):
-                new_body = [Assign([lhs], result)]
+                print("yyyy")
+                new_body = [Assign([lhs], result)] + cont
                 for s in reversed(body):
                     # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
             case _:
+                if str(lhs.id) == 'tmp.0':
+                    print("xxxx")
                 return [Assign([lhs], rhs)] + cont
 
 
@@ -247,14 +251,15 @@ class Compiler:
                          basic_blocks: Dict[str, List[stmt]]) -> List[stmt]:
         match e:
             case IfExp(test, body, orelse):
-                body = self.explicate_effect(body, cont, basic_blocks)
-                orelse = self.explicate_effect(orelse, cont, basic_blocks)
+                goto_cont = create_block(cont, basic_blocks)
+                body = self.explicate_effect(body, [goto_cont], basic_blocks)
+                orelse = self.explicate_effect(orelse, [goto_cont], basic_blocks)
                 return self.explicate_pred(test, body, orelse, basic_blocks)
             case Call(func, args):
                 print("#####", e)
                 return [Expr(e)] + cont
             case Begin(body, result):
-                new_body = self.explicate_effect(result, cont, basic_blocks)
+                new_body = self.explicate_effect(result, cont, basic_blocks) + [cont]
                 for s in reversed(body):
                     # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
@@ -325,13 +330,14 @@ class Compiler:
     def explicate_control(self, p):
         match p:
             case Module(body):
-                new_body = [Return(Constant(0))]
+                new_body = []
                 basic_blocks = {}
                 for s in reversed(body):
                     # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 basic_blocks[label_name('start')] = new_body
                 result = CProgram(basic_blocks)
+        f = interp_Cif.InterpCif().interp
         # breakpoint()
         return result
 
@@ -344,10 +350,37 @@ class Compiler:
         match e:
             case Name(name):
                 return Variable(name)
+            case Constant(True):
+                return Immediate(1)
+            case Constant(False):
+                return Immediate(0)
             case Constant(value):
                 return Immediate(value)
             case _:
-                raise Exception('error in rco_exp, unexpected ' + repr(e))
+                raise Exception('error in select_arg, unexpected ' + repr(e))
+
+    def select_compare(self, expr, then_label, else_label) -> List[instr]:
+        # e | ne | l | le | g | ge
+        op_dict = {
+            "==": "e",
+            "<=": "le",
+            "<": "l",
+            ">=": "ge",
+            ">": "g",
+            "!=": "ne",
+        }
+        match expr:
+            case Compare(x, [op], [y]):
+                # breakpoint()
+                x = self.select_arg(x)
+                y = self.select_arg(y)
+                return [
+                    Instr('cmpq', [x, y]),
+                    # Instr('j{}'.format(op_dict[str(op)]), [then_label]),
+                    JumpIf(op_dict[str(op)], then_label),
+                    Jump(else_label)
+                    # Instr('jmp', [else_label])
+                ]
 
     def select_stmt(self, s: stmt) -> List[instr]:
         # YOUR CODE HERE
@@ -396,30 +429,48 @@ class Compiler:
                 lhs = self.select_arg(lhs)
                 result.append(Callq(label_name("read_int"), 0))
                 result.append(Instr('movq', [Reg('rax'), lhs]))
+            case Assign([lhs], UnaryOp(Not(), rhs)) if rhs == rhs:
+                lhs = self.select_arg(lhs)
+                result.append(Instr('xorq',[Immediate(1), lhs]))
+            case Assign([lhs], UnaryOp(Not(), rhs)):
+                lhs = self.select_arg(lhs)
+                arg = self.select_arg(rhs)
+                result.append(Instr('movq',[arg, lhs]))
+                result.append(Instr('xorq', [Immediate(1), lhs]))
             case Assign([lhs], value):
                 lhs = self.select_arg(lhs)
                 arg = self.select_arg(value)
                 result.append(Instr('movq', [arg, lhs]))
+            case Return(Constant(value)):
+                result.append(Instr('movq', [self.select_arg(Constant(value)), Reg('rax')]))
+                result.append(Instr('retq', []))
+            case Goto(label):
+                result.append(Jump(label))
+            case If(expr, [Goto(then_label)], [Goto(else_label)]):
+                if_ = self.select_compare(expr, then_label, else_label)
+                result.extend(if_)
             case _:
-                raise Exception('error in rco_stmt, unexpected ' + repr(s))
+                raise Exception('error in select_stmt, unexpected ' + repr(s))
         return result
         pass        
 
     def select_instructions(self, p: Module) -> X86Program:
         # YOUR CODE HERE
 
-        instr_body = []
+
+        blocks = {}
         match p:
-            case Module(body):
-                print(body)
-                # breakpoint()
-                for s in body:
-                    instr_body.extend(self.select_stmt(s))
+            case CProgram(basic_blocks):
+                for label, body in basic_blocks.items():
+                    instr_body = []
+                    for s in body:
+                        instr_body.extend(self.select_stmt(s))
+                    blocks[label] = instr_body
             case _:
                 raise Exception('interp: unexpected ' + repr(p))
 
 
-        x86 = X86Program(instr_body)
+        x86 = X86Program(blocks)
         # breakpoint()
         # print("......")
         # interp_x86(x86)

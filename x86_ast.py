@@ -86,6 +86,7 @@ class JumpIf(instr):
         self.cc = cc
         self.label = label
     def __str__(self):
+        # breakpoint()
         return indent_stmt() + 'j' + self.cc + ' ' + self.label + '\n'
     def __repr__(self):
         return 'JumpIf(' + repr(self.cc) + ', ' + repr(self.label) + ')'
