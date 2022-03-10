@@ -4,7 +4,7 @@ from re import T
 from utils import *
 from x86_ast import *
 import os
-from graph import UndirectedAdjList
+from graph import UndirectedAdjList, transpose, topological_sort
 from priority_queue import PriorityQueue
 import interp_Cif
 from typing import List, Tuple, Set, Dict
@@ -554,49 +554,88 @@ class Compiler:
             case _:
                 return set()
 
-    def uncover_live(self, ss: List[instr]) -> Dict[instr, Set[location]]:
+    def uncover_live(self, ss: List[instr], live_before_block) -> Dict[instr, Set[location]]:
 
-        pre_instr_set = set()
+        # pre_instr_set = set()
         pre_instr = ss[-1]
+
+        match ss[-1]:
+            case Jump(label):
+                pre_instr_set = live_before_block[label]
+            case JumpIf(label):
+                # jumpif 在最后是没有接着的指令的
+                print("Never happened")
+                pre_instr_set = set()
+            case _:
+                pre_instr_set = set()
+
         live_after = {
-            ss[-1]: set()
+            ss[-1]: pre_instr_set
         }
         for s in list(reversed(ss))[1:]:
-            pre_instr_set = (pre_instr_set - self.write_var(pre_instr)).union(self.read_var(pre_instr))
+            match s:
+                case Jump(label):
+                    pre_instr_set = live_before_block[label]
+                case JumpIf(cc, label):
+                    tmp = (pre_instr_set - self.write_var(pre_instr)).union(self.read_var(pre_instr))
+                    pre_instr_set = tmp.union(live_before_block[label])
+                case _:
+                    pre_instr_set = (pre_instr_set - self.write_var(pre_instr)).union(self.read_var(pre_instr))
+
             pre_instr = s
             live_after[s] = pre_instr_set
 
         return live_after
 
 
-    def build_interference(self, ss: List[instr]) -> UndirectedAdjList:
-        live_after = self.uncover_live(ss)
+    def build_interference(self, blocks) -> UndirectedAdjList:
+        cfg = UndirectedAdjList()
+        for label, body in blocks.items():
+            for i in body:
+                if isinstance(i, Jump) or isinstance(i, JumpIf):
+                    # breakpoint()
+                    cfg.add_edge(label, i.label)
+
+        t_cfg = transpose(cfg)
         interference_graph = UndirectedAdjList()
+        self.sort_cfg = topological_sort(cfg)
+        live_before_block = {}
+        live_after = {}
+        for label in reversed(self.sort_cfg):
+            ss = blocks[label]
+            tmp = self.uncover_live(ss, live_before_block)
+            live_before_block[label] = tmp[ss[0]]
+            live_after.update(tmp)
+
         print("live_after ", live_after)
-        for s in ss:
-            match (s):
-                case Instr("movq", [si, d]):
-                    # si = s.args[0]
-                    for v in live_after[s]:
-                        if v != d and v != si:
-                            interference_graph.add_edge(d, v)
-                # case Instr("movq", [Reg(x), t]):
-                #     si = s.args[0]
-                #     for v in live_after[si]:
-                #         if v != d and v != si:
-                #             interference_graph.add_edge(d, v)
-                case _:
-                    wset = self.write_var(s)
-                    for d in wset:
+        for label, ss in blocks.items():
+            for s in ss:
+                match (s):
+                    case Instr("movq", [si, d]):
+                        # si = s.args[0]
                         for v in live_after[s]:
-                            if v != d:
+                            if v != d and v != si:
                                 interference_graph.add_edge(d, v)
+                    # case Instr("movq", [Reg(x), t]):
+                    #     si = s.args[0]
+                    #     for v in live_after[si]:
+                    #         if v != d and v != si:
+                    #             interference_graph.add_edge(d, v)
+                    case _:
+                        wset = self.write_var(s)
+                        for d in wset:
+                            for v in live_after[s]:
+                                if v != d:
+                                    interference_graph.add_edge(d, v)
         return interference_graph
 
-    def color_graph(self, ss: List[instr], k=100) -> Dict[location, int]:
+    #def color_graph(self, ss: List[instr], k=100) -> Dict[location, int]:
+    def color_graph(self, blocks, k=100) -> Dict[location, int]:
         # first make it k big enough
         valid_colors = list(range(0, k))  # number of colar
-        color_map = {}
+        # Rdi 的保存问题 
+        color_map = {Reg('rax'): -1, Reg('rsp'): -2, Reg('rdi'): -3}
+        # color_map = {}
         saturated = {}
 
         def less(u, v):
@@ -607,12 +646,13 @@ class Compiler:
             return len(saturated[u]) < len(saturated[v])
 
         queue = PriorityQueue(less)
-        interference_graph = self.build_interference(ss)
-        # dot = interference_graph.show()
+        interference_graph = self.build_interference(blocks)
+        dot = interference_graph.show()
         # breakpoint()
         # dot.view()
         # breakpoint()
         vsets = interference_graph.vertices()
+        # breakpoint()
         for v in vsets:
             saturated[v] = set()
         for v in vsets:
@@ -626,7 +666,8 @@ class Compiler:
             print(u, adj_colors)
             if left_color := set(valid_colors) - adj_colors:
                 color = min(left_color)
-                color_map[u] = color
+                if u not in color_map:
+                    color_map[u] = color
                 for v in interference_graph.adjacent(u):
                     saturated[v].add(color)
             # else:
@@ -636,7 +677,8 @@ class Compiler:
 
     def allocate_registers(self, p: X86Program) -> X86Program:
         # YOUR CODE HERE
-        result = []
+
+        # ? RDI
         self.color_regs = [Reg("rbx"), Reg("rcx"), Reg("rdx"), Reg("rsi"), Reg("rdi"), Reg("r8"), Reg("r9"), Reg("r10")]
         self.color_regs = [Reg("rbx"), Reg("rcx")]
         self.color_regs = [Reg("rbx")]
@@ -645,17 +687,24 @@ class Compiler:
         self.alloc_callee_saved_regs = list(set(self.color_regs).intersection(callee_saved_regs))
         self.C = len(self.alloc_callee_saved_regs)
         # used_regs = 1
-        color_regs_map = {i:reg for i, reg in enumerate(self.color_regs)}
+        color_regs_map = {i: reg for i, reg in enumerate(self.color_regs)}
+        color_regs_map[-1] = Reg('rax')
+        color_regs_map[-2] = Reg('rsp')
+        color_regs_map[-3] = Reg('rdi')
         self.real_color_map = {}
 
         match(p):
-            case X86Program(body):
-                color_map = self.color_graph(body)
+            case X86Program(blocks):
+
+                # breakpoint()
+                new_blocks = {}
+                color_map = self.color_graph(blocks)
                 self.S = len(set(color_map.values())) - len(self.color_regs)
 
                 print("color_map", color_map)
 
                 for color in sorted(set(color_map.values())):
+
                     if color in self.real_color_map:
                         continue
                     if color in color_regs_map:
@@ -666,27 +715,32 @@ class Compiler:
 
                 print("real_color_map", self.real_color_map)
 
-                for s in body:
-                    match(s):
-                        case Instr(op, [source, target]):
-                            if (color := color_map.get(source)) is not None:
-                                source = self.real_color_map[color]
-                            if (color := color_map.get(target)) is not None:
-                                target = self.real_color_map[color]
-                            result.append(Instr(op, [source, target]))
-                        case Instr(op, [source]):
-                            if (color := color_map.get(source)) is not None:
-                                source = self.real_color_map[color]
-                            result.append(Instr(op, [source]))
-                        case _:
-                            result.append(s)
+                for label in self.sort_cfg:
+                    ss = blocks[label]
+                    result = []
+                    for s in ss:
+                        match(s):
+                            case Instr(op, [source, target]):
+                                # breakpoint()
+                                if (color := color_map.get(source)) is not None:
+                                    source = self.real_color_map[color]
+                                if (color := color_map.get(target)) is not None:
+                                    target = self.real_color_map[color]
+                                result.append(Instr(op, [source, target]))
+                            case Instr(op, [source]):
+                                if (color := color_map.get(source)) is not None:
+                                    source = self.real_color_map[color]
+                                result.append(Instr(op, [source]))
+                            case _:
+                                result.append(s)
+                    new_blocks[label] = result
 
         # breakpoint()
         # breakpoint()
 
         self.rsp_sub = align(8 * self.S + 8 * self.C, 16) - 8 * self.C
 
-        return X86Program(result)
+        return X86Program(new_blocks)
 
 
 
