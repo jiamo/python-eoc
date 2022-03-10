@@ -17,7 +17,14 @@ caller_saved_regs = {Reg('rax'), Reg('rcx'), Reg('rdx'), Reg('rsi'),Reg('rdi'),R
                     Reg("r10"), Reg('r11')}
 callee_saved_regs = {Reg('rsp'), Reg('rbp'), Reg("rbx"), Reg("r12"), Reg("r13"), Reg("r14"),Reg("r15")}
 arg_regs = [Reg("rdi"), Reg("rsi"), Reg("rdx"), Reg("rcx"), Reg("r8"), Reg("r9")]
-
+op_dict = {
+    "==": "e",
+    "<=": "le",
+    "<": "l",
+    ">=": "ge",
+    ">": "g",
+    "!=": "ne",
+}
 
 
 class Compiler:
@@ -330,7 +337,7 @@ class Compiler:
     def explicate_control(self, p):
         match p:
             case Module(body):
-                new_body = []
+                new_body = [Return(Constant(0))]
                 basic_blocks = {}
                 for s in reversed(body):
                     # the new_body was after s we need do the new_body
@@ -361,14 +368,7 @@ class Compiler:
 
     def select_compare(self, expr, then_label, else_label) -> List[instr]:
         # e | ne | l | le | g | ge
-        op_dict = {
-            "==": "e",
-            "<=": "le",
-            "<": "l",
-            ">=": "ge",
-            ">": "g",
-            "!=": "ne",
-        }
+
         match expr:
             case Compare(x, [op], [y]):
                 # breakpoint()
@@ -437,6 +437,14 @@ class Compiler:
                 arg = self.select_arg(rhs)
                 result.append(Instr('movq',[arg, lhs]))
                 result.append(Instr('xorq', [Immediate(1), lhs]))
+            case Assign([lhs], Compare(x, [op], [y])):
+                lhs = self.select_arg(lhs)
+                l = self.select_arg(x)
+                r = self.select_arg(y)
+                result.append(Instr('cmpq', [l, r]))
+                result.append(Instr('set{}'.format(op_dict[str(op)]), [ByteReg('bl')]))
+                result.append(Instr('movzbq', [ByteReg('bl'), lhs]))
+                pass
             case Assign([lhs], value):
                 lhs = self.select_arg(lhs)
                 arg = self.select_arg(value)
@@ -540,6 +548,8 @@ class Compiler:
                 return {i.args[0]}
             case Instr(op, [Reg(s)]):
                 return {i.args[0]}
+            case Instr(op, [ByteReg(s)]):
+                return {i.args[0]}
             case Callq(func, num_args):
                 return set(arg_regs[:num_args])
             case _:
@@ -633,8 +643,8 @@ class Compiler:
     def color_graph(self, blocks, k=100) -> Dict[location, int]:
         # first make it k big enough
         valid_colors = list(range(0, k))  # number of colar
-        # Rdi 的保存问题 
-        color_map = {Reg('rax'): -1, Reg('rsp'): -2, Reg('rdi'): -3}
+        # Rdi 的保存问题
+        color_map = {Reg('rax'): -1, Reg('rsp'): -2, Reg('rdi'): -3, ByteReg('bl'): -4}
         # color_map = {}
         saturated = {}
 
@@ -682,7 +692,8 @@ class Compiler:
         self.color_regs = [Reg("rbx"), Reg("rcx"), Reg("rdx"), Reg("rsi"), Reg("rdi"), Reg("r8"), Reg("r9"), Reg("r10")]
         self.color_regs = [Reg("rbx"), Reg("rcx")]
         self.color_regs = [Reg("rbx")]
-        self.color_regs = [Reg("rcx")]
+        # rcx as tmp
+        self.color_regs = [Reg("rbx"), Reg("rcx")]
 
         self.alloc_callee_saved_regs = list(set(self.color_regs).intersection(callee_saved_regs))
         self.C = len(self.alloc_callee_saved_regs)
@@ -691,6 +702,7 @@ class Compiler:
         color_regs_map[-1] = Reg('rax')
         color_regs_map[-2] = Reg('rsp')
         color_regs_map[-3] = Reg('rdi')
+        color_regs_map[-4] = ByteReg("bl")
         self.real_color_map = {}
 
         match(p):
@@ -757,13 +769,23 @@ class Compiler:
                     Instr("movq", [Deref("rbp", x), Reg("rax")]),
                     Instr("movq", [Reg("rax"), Deref("rbp", y)])
                 ]
+            case Instr('cmpq', [x, Immediate(v)]):
+                return [
+                    Instr("movq", [Immediate(v), Reg("rax")]),
+                    Instr("cmpq", [x, Reg("rax")])
+                ]
+            case Instr('movzbq', [ByteReg('bl'), Deref("rbp", y)]):
+                return [
+                    Instr("movzbq", [ByteReg('bl'), Reg("rax")]),
+                    Instr("movq", [Reg("rax"), Deref("rbp", y)])
+                ]
             case Instr(instr, args):
                 return [i]
             case Callq(func, num_args):
                 return [i]
             case _:
-                raise Exception('error in assign_homes_instr, unexpected ' + repr(i))
-        pass        
+                return [i]
+        pass
 
     def patch_instrs(self, ss: List[instr]) -> List[instr]:
         result = []
@@ -773,11 +795,14 @@ class Compiler:
         return result
 
     def patch_instructions(self, p: X86Program) -> X86Program:
+        new_blocks = {}
         match(p):
-            case X86Program(body):
-                result = self.patch_instrs(body)
+            case X86Program(blocks):
+                for label, body in blocks.items():
+                    result = self.patch_instrs(body)
+                    new_blocks[label] = result
         # breakpoint()
-        return X86Program(result)
+        return X86Program(new_blocks)
 
     ############################################################################
     # Prelude & Conclusion
@@ -785,38 +810,43 @@ class Compiler:
 
     def prelude_and_conclusion(self, p: X86Program) -> X86Program:
         # YOUR CODE HERE
-        result = []
-
-
+        main = []
+        conclusion = []
         # The spilled variables must b placed lower on the stackthan the saved callee
         # because there is rsp betweent it
+        print("alloc_callee_saved_regs ", self.alloc_callee_saved_regs)
         extra_saved_regs = list(set(self.alloc_callee_saved_regs) - {Reg("rbp")})
         # breakpoint()
+
         match (p):
-            case X86Program(body):
-                result.extend([
+            case X86Program(blocks):
+                main.extend([
                     Instr("pushq", [Reg("rbp")]),
                     Instr("movq", [Reg("rsp"), Reg("rbp")]),
 
                 ])
                 # save
                 for reg in extra_saved_regs:
-                    result.append(Instr("pushq", [reg]))
-                result.extend([ Instr("subq", [Immediate(self.rsp_sub), Reg("rsp")])])
+                    main.append(Instr("pushq", [reg]))
+                main.extend([ Instr("subq", [Immediate(self.rsp_sub), Reg("rsp")])])
+                main.append(Jump(label_name("start")))
+                blocks[label_name("main")] = main
+                # for label , body in blocks.items():
+                #     pass
 
-                result.extend(body)
-                result.extend([ Instr("addq", [Immediate(self.rsp_sub), Reg("rsp")]),])
-
-                # recover
+                conclusion.extend([ Instr("addq", [Immediate(self.rsp_sub), Reg("rsp")]),])
                 for reg in extra_saved_regs[::-1]:
-                    result.append(Instr("popq", [reg]))
+                    conclusion.append(Instr("popq", [reg]))
 
-                result.extend([
+                conclusion.extend([
                     Instr("popq", [Reg("rbp")]),
                     Instr("retq", []),
                 ])
+                blocks[label_name("conclusion")] = conclusion
+
+                blocks[self.sort_cfg[-1]][-1] = Jump(label_name("conclusion"))
 
 
         # breakpoint()
-        return X86Program(result)
+        return X86Program(blocks)
 
