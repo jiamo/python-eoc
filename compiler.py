@@ -3,6 +3,8 @@ from ast import *
 from re import T
 from utils import *
 from x86_ast import *
+from collections import deque
+from functools import reduce
 import os
 from graph import UndirectedAdjList, transpose, topological_sort
 from priority_queue import PriorityQueue
@@ -92,6 +94,10 @@ class Compiler:
                 body = [self.shrink_stmt(s) for s in body]
                 orelse =  [self.shrink_stmt(s) for s in orelse]
                 result = If(test_expr, body, orelse)
+            case While(test, body, []):
+                test_expr = self.shrink_exp(test)
+                body = [self.shrink_stmt(s) for s in body]
+                result = While(test_expr, body, [])
             case _:
                 raise Exception('error in rco_stmt, unexpected ' + repr(s))
         return result
@@ -173,6 +179,7 @@ class Compiler:
                     return tmp, test_tmps
                 else:
                     return return_expr, test_tmps
+
             case _:
                 raise Exception('error in rco_exp, unexpected ' + repr(e))
     
@@ -209,6 +216,14 @@ class Compiler:
                 for s in orelse:
                     orelse_stmts.extend(self.rco_stmt(s))
                 result.append(If(test_expr, body_stmts, orelse_stmts))
+            case While(test, body, []):
+                test_expr, test_tmps = self.rco_exp(test, False)
+                body_stmts = []
+                for name, t_expr in test_tmps:
+                    result.append(Assign([name], t_expr))
+                for s in body:
+                    body_stmts.extend(self.rco_stmt(s))
+                result.append(While(test_expr, body_stmts, []))
             case _:
                 raise Exception('error in rco_stmt, unexpected ' + repr(s))
         return result
@@ -331,6 +346,17 @@ class Compiler:
                     new_orelse = self.explicate_stmt(s, new_orelse, basic_blocks)
 
                 return self.explicate_pred(test, new_body, new_orelse, basic_blocks)
+            case While(test, body, []):
+                # after_while = create_block(cont, basic_blocks)
+                # goto_after_while = [after_while]
+                test_label = label_name(generate_name('block'))
+                new_body = [Goto(test_label)]
+                for s in reversed(body):
+                    # the new_body was after s we need do the new_body
+                    new_body = self.explicate_stmt(s, new_body, basic_blocks)
+                test_stmts =  self.explicate_pred(test, new_body, cont, basic_blocks)
+                basic_blocks[test_label] = test_stmts
+                return [Goto(test_label)]
             # case Expr(Call(Name('print'), [arg])):
             #     return [s] + cont
 
@@ -338,6 +364,9 @@ class Compiler:
         match p:
             case Module(body):
                 new_body = [Return(Constant(0))]
+                # 也许这里是一个 newblock conclude = block(Return(Constant(0))])
+                # create_block 是 goto 那个 bloc
+                # conclude 这里是从那里 goto 到这里
                 basic_blocks = {}
                 for s in reversed(body):
                     # the new_body was after s we need do the new_body
@@ -375,7 +404,7 @@ class Compiler:
                 x = self.select_arg(x)
                 y = self.select_arg(y)
                 return [
-                    Instr('cmpq', [x, y]),
+                    Instr('cmpq', [y, x]),
                     # Instr('j{}'.format(op_dict[str(op)]), [then_label]),
                     JumpIf(op_dict[str(op)], then_label),
                     Jump(else_label)
@@ -598,6 +627,18 @@ class Compiler:
         return live_after
 
 
+    def analyze_dataflow(self, G, transfer, bottom, join):
+        trans_G = transpose(G)
+        mapping = dict((v, bottom) for v in G.vertices())
+        worklist = deque(G.vertices)
+        while worklist:
+            node = worklist.pop()
+            inputs = [mapping[v] for v in trans_G.adjacent(node)]
+            input = reduce(join, inputs, bottom)
+            output = transfer(node, input)
+            if output != mapping[node]:
+                worklist.extend(G.adjacent(node))
+
     def build_interference(self, blocks) -> UndirectedAdjList:
         cfg = UndirectedAdjList()
         for label, body in blocks.items():
@@ -611,9 +652,13 @@ class Compiler:
         self.sort_cfg = topological_sort(cfg)
         live_before_block = {}
         live_after = {}
+
         for label in reversed(self.sort_cfg):
             ss = blocks[label]
             tmp = self.uncover_live(ss, live_before_block)
+            # live update bind instr with
+            # flow 分析解决的是 block 的分析问题。
+            # 在解决 block 的
             live_before_block[label] = tmp[ss[0]]
             live_after.update(tmp)
 

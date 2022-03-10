@@ -4,6 +4,7 @@ import compiler
 import interp_Pvar
 import interp_Lvar
 import interp_Lif
+import interp_Lwhile
 import type_check_Pvar
 import type_check_Lvar
 import interp_Cif
@@ -21,8 +22,9 @@ type_check_dict = {
 interp_dict = {
     "var": interp_Lvar.InterpLvar().interp,
     "cond": interp_Lif.InterpLif().interp,
-    "shrink": interp_Lif.InterpLif().interp,
-    "remove_complex_operands": interp_Lif.InterpLif().interp,
+    "while": interp_Lwhile.InterpLwhile().interp,
+    "shrink": interp_Lwhile.InterpLwhile().interp,
+    "remove_complex_operands": interp_Lwhile.InterpLwhile().interp,
     "explicate_control": interp_Cif.InterpCif().interp,
     "select_instructions": interp_x86,
     "assign_homes": interp_x86,
@@ -33,8 +35,8 @@ interp_dict = {
 
 if len(sys.argv) == 2:
     one_test_file = sys.argv[1]
-    run_one_test(one_test_file, 'cond',
-                 compiler, 'cond',
+    run_one_test(one_test_file, 'while',
+                 compiler, 'while',
                  #type_check_Pvar.TypeCheckPvar().type_check_P,
                  type_check_dict,
                  # interp_Pvar.InterpPvar().interp_P,
