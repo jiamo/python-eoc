@@ -363,11 +363,19 @@ class Compiler:
     def explicate_control(self, p):
         match p:
             case Module(body):
-                new_body = [Return(Constant(0))]
+                basic_blocks = {}
+                conclusion = []
+                conclusion.extend([
+                    Return(Constant(0)),
+                ])
+                basic_blocks[label_name("conclusion")] = conclusion
+
+                # blocks[self.sort_cfg[-1]][-1] = Jump(label_name("conclusion"))
+                new_body = [Goto(label_name("conclusion"))]
                 # 也许这里是一个 newblock conclude = block(Return(Constant(0))])
                 # create_block 是 goto 那个 bloc
                 # conclude 这里是从那里 goto 到这里
-                basic_blocks = {}
+
                 for s in reversed(body):
                     # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
@@ -569,6 +577,8 @@ class Compiler:
 
     def read_var(self, i: instr) -> Set[location]:
         match (i):
+            case Instr(cmpq, [s, Variable(t)]):
+                return {i.args[1]}
             case Instr(op, [Variable(s), t]):
                 return {i.args[0]}
             case Instr(op, [Reg(s), t]):
@@ -627,17 +637,68 @@ class Compiler:
         return live_after
 
 
+    def transfer(self,label, live_after_block):
+        ss = self.blocks[label]
+        after_instr_set = live_after_block  # the set after the block
+        live_before_block = set()
+
+        self.live_after[ss[-1]] = after_instr_set
+        s = ss[-1]
+        match s:
+            # jump 到别处 通过的是 input 来传岛的
+            case Jump(label):
+                before_instr_set = live_after_block
+            case JumpIf(cc, label):
+                tmp = (self.live_after[s] - self.write_var(s)).union(self.read_var(s))
+                before_instr_set = tmp.union(live_after_block)
+            case _:
+                before_instr_set = (self.live_after[s] - self.write_var(s)).union(self.read_var(s))
+
+        pre_instr = ss[-1]
+        self.live_before[pre_instr] = before_instr_set
+        live_before_block = live_before_block.union(before_instr_set)
+
+        for s in list(reversed(ss))[1:]:
+            self.live_after[s] = self.live_before[pre_instr]
+            match s:
+                # jump 到别处 通过的是 input 来传岛的
+                case Jump(label):
+                    before_instr_set = live_after_block
+                case JumpIf(cc, label):
+                    tmp = (self.live_after[s] - self.write_var(s)).union(self.read_var(s))
+                    before_instr_set = tmp.union(live_after_block)
+                case _:
+                    before_instr_set = (self.live_after[s] - self.write_var(s)).union(self.read_var(s))
+            # print("s" , s, pre_instr_set)
+            self.live_before[s] = before_instr_set
+            live_before_block = live_before_block.union(before_instr_set)
+            pre_instr = s
+            # self.live_after[s] = pre_instr_set.union(self.live_after.get(s, set()))
+
+        # pre_instr_set = (pre_instr_set - self.write_var(pre_instr)).union(self.read_var(pre_instr))
+        # print("after_set ", pre_instr_set)
+        # live_before_block = live_before_block.union(pre_instr_set)
+        return live_before_block
+
+
     def analyze_dataflow(self, G, transfer, bottom, join):
         trans_G = transpose(G)
         mapping = dict((v, bottom) for v in G.vertices())
-        worklist = deque(G.vertices)
+        worklist = deque(G.vertices())
+        debug = {}
         while worklist:
+            print(worklist)
             node = worklist.pop()
             inputs = [mapping[v] for v in trans_G.adjacent(node)]
             input = reduce(join, inputs, bottom)
             output = transfer(node, input)
+            print("node", node, "input", input, "output", output)
             if output != mapping[node]:
                 worklist.extend(G.adjacent(node))
+                mapping[node] = output
+            else:
+                debug[node] = output
+        return debug
 
     def build_interference(self, blocks) -> UndirectedAdjList:
         cfg = UndirectedAdjList()
@@ -649,26 +710,30 @@ class Compiler:
 
         t_cfg = transpose(cfg)
         interference_graph = UndirectedAdjList()
-        self.sort_cfg = topological_sort(cfg)
+        # self.sort_cfg = topological_sort(cfg)
         live_before_block = {}
-        live_after = {}
+        self.live_after = {}
+        self.live_before = {}
+        self.live_before_block = {}
+        self.blocks = blocks
+        debug = self.analyze_dataflow(cfg, self.transfer, set(), lambda x,y: x|y)
+        # breakpoint()
+        # for label in reversed(self.sort_cfg):
+        #     ss = blocks[label]
+        #     tmp = self.uncover_live(ss, live_before_block)
+        #     # live update bind instr with
+        #     # flow 分析解决的是 block 的分析问题。
+        #     # 在解决 block 的
+        #     live_before_block[label] = tmp[ss[0]]
+        #     live_after.update(tmp)
 
-        for label in reversed(self.sort_cfg):
-            ss = blocks[label]
-            tmp = self.uncover_live(ss, live_before_block)
-            # live update bind instr with
-            # flow 分析解决的是 block 的分析问题。
-            # 在解决 block 的
-            live_before_block[label] = tmp[ss[0]]
-            live_after.update(tmp)
-
-        print("live_after ", live_after)
+        print("live_after ", self.live_after)
         for label, ss in blocks.items():
             for s in ss:
                 match (s):
                     case Instr("movq", [si, d]):
                         # si = s.args[0]
-                        for v in live_after[s]:
+                        for v in self.live_after[s]:
                             if v != d and v != si:
                                 interference_graph.add_edge(d, v)
                     # case Instr("movq", [Reg(x), t]):
@@ -679,7 +744,7 @@ class Compiler:
                     case _:
                         wset = self.write_var(s)
                         for d in wset:
-                            for v in live_after[s]:
+                            for v in self.live_after[s]:
                                 if v != d:
                                     interference_graph.add_edge(d, v)
         return interference_graph
@@ -772,7 +837,7 @@ class Compiler:
 
                 print("real_color_map", self.real_color_map)
 
-                for label in self.sort_cfg:
+                for label, ss in self.blocks.items():
                     ss = blocks[label]
                     result = []
                     for s in ss:
@@ -882,14 +947,16 @@ class Compiler:
                 conclusion.extend([ Instr("addq", [Immediate(self.rsp_sub), Reg("rsp")]),])
                 for reg in extra_saved_regs[::-1]:
                     conclusion.append(Instr("popq", [reg]))
+                conclusion.append(Instr("popq", [Reg('rbp')]))  # seem no need pop
+                blocks[label_name("conclusion")] = conclusion + blocks[label_name("conclusion")]
 
-                conclusion.extend([
-                    Instr("popq", [Reg("rbp")]),
-                    Instr("retq", []),
-                ])
-                blocks[label_name("conclusion")] = conclusion
-
-                blocks[self.sort_cfg[-1]][-1] = Jump(label_name("conclusion"))
+                # conclusion.extend([
+                #     Instr("popq", [Reg("rbp")]),
+                #     Instr("retq", []),
+                # ])
+                # blocks[label_name("conclusion")] = conclusion
+                #
+                # blocks[self.sort_cfg[-1]][-1] = Jump(label_name("conclusion"))
 
 
         # breakpoint()
