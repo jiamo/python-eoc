@@ -9,10 +9,12 @@ import os
 from graph import UndirectedAdjList, transpose, topological_sort
 from priority_queue import PriorityQueue
 import interp_Cif
-from typing import List, Tuple, Set, Dict
+from typing import List, Set, Dict
+from typing import Tuple as Tupling
+import type_check_Ltup
 from interp_x86.eval_x86 import interp_x86
 
-Binding = Tuple[Name, expr]
+Binding = Tupling[Name, expr]
 Temporaries = List[Binding]
 
 caller_saved_regs = {Reg('rax'), Reg('rcx'), Reg('rdx'), Reg('rsi'),Reg('rdi'),Reg('r8'),Reg('r9'),
@@ -120,8 +122,94 @@ class Compiler:
         trace(result)
         return result
 
+    def expose_allocation_exp(self, exp) -> Tupling[expr, List[stmt]]:
+        match exp:
+            case Subscript(value, slice, ctx):
+                new_value, stmts = self.expose_allocation_exp(value)
+                return Subscript(new_value, slice, ctx), stmts
+            case Tuple(exprs):
+                stmts = []
 
-    def rco_exp(self, e: expr, need_atomic: bool) -> Tuple[expr, Temporaries]:
+                # do expr
+                tmp_exprs = []
+                for expr in exprs:
+                    tmp = generate_name("tmp")
+                    var = Name(tmp)
+                    new_expr, tmp_stmts = self.expose_allocation_exp(expr)
+                    stmts.extend(tmp_stmts)
+                    new_stmt = Assign([var], new_expr)
+                    stmts.append(new_stmt)
+                    tmp_exprs.append(var)
+                # breakpoint()
+                n = 8 + 8 * len(exprs)
+                stmts.append(
+                    If(Compare(BinOp(GlobalValue("free_pr"), Add(), Constant(n)), [Lt()], [GlobalValue("fromspace_end")]),
+                       [Expr(Constant(0))],
+                       [Collect(n)])
+                )
+                tmp = generate_name(tmp)
+                var = Name(tmp)
+                stmts.append(Assign([var], Allocate(n, exp.has_type))) # may exp.has_type.types
+                for i in range(len(exprs)):
+                    stmts.append(Assign([Subscript(var, Constant(i), Load())], tmp_exprs[i])) # todo the Load is what
+                return var, stmts
+            case _:
+                return exp, []
+
+
+    def expose_allocation_stmt(self, s: stmt) -> List[stmt]:
+        # result = []
+        # breakpoint()
+        match s:
+            case Expr(Call(Name('print'), [arg])):
+                new_arg, stmts = self.expose_allocation_exp(arg)
+                return stmts + [Expr(Call(Name('print'), [new_arg]))]
+            case Expr(value):
+                expr, stmts = self.expose_allocation_exp(value)
+                return stmts + [Expr(expr)]
+            case Assign([lhs], value):
+                v_expr , stmts = self.expose_allocation_exp(value)
+                return stmts + [Assign([lhs], v_expr)]
+            case If(test, body, orelse):
+                test_expr, stmts = self.expose_allocation_exp(test)
+                body_stmts = []
+                for s in body:
+                    body_stmts.extend(self.expose_allocation_stmt(s))
+                orelse_stmts = []
+                for s in orelse:
+                    orelse_stmts.extend(self.expose_allocation_stmt(s))
+                return stmts + [If(test_expr, body_stmts, orelse_stmts)]
+            case While(test, body, []):
+                test_expr, stmts = self.expose_allocation_exp(test)
+                body_stmts = []
+                for s in body:
+                    body_stmts.extend(self.expose_allocation_stmt(s))
+                return stmts + [While(test_expr, body_stmts, [])]
+            # case _:
+            #     raise Exception('error in rco_stmt, unexpected ' + repr(s))
+        # return result
+
+    def expose_allocation(self, p):
+        # YOUR CODE HERE
+        # trace(p)
+        type_check_Ltup.TypeCheckLtup().type_check(p)
+        result = []
+        match p:
+            case Module(body):
+                print(body)
+                # breakpoint()
+                for s in body:
+                    # breakpoint()
+                    result.extend(self.expose_allocation_stmt(s))
+                result = Module(result)
+            case _:
+                raise Exception('interp: unexpected ' + repr(p))
+
+        # breakpoint()
+        trace(result)
+        return result
+
+    def rco_exp(self, e: expr, need_atomic: bool) -> Tupling[expr, Temporaries]:
         # YOUR CODE HERE
         match e:
             case Name(id):
@@ -149,6 +237,20 @@ class Compiler:
                     return tmp, v_tmps
                 else:
                     return return_expr, v_tmps
+            case GlobalValue(label):
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    # v_tmps.append()
+                    return tmp, [(tmp, e)]
+                else:
+                    return e, []
+            case Allocate(length, ty):
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    # v_tmps.append()
+                    return tmp, [(tmp, e)]
+                else:
+                    return e, []
             case Constant(value):
                 return e, []
             case Call(Name('input_int'), []):
@@ -179,7 +281,20 @@ class Compiler:
                     return tmp, test_tmps
                 else:
                     return return_expr, test_tmps
-
+            case Subscript(value, slice, ctx):
+                value_expr, value_tmps = self.rco_exp(value, True)
+                slice_expr, slice_tmps = self.rco_exp(slice, True)
+                return_expr = Subscript(value_expr, slice_expr, ctx)
+                value_tmps.extend(slice_tmps)
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    value_tmps.append((tmp, return_expr))
+                    return tmp, value_tmps
+                else:
+                    return return_expr, value_tmps
+                # return Subscript(new_value, slice, ctx)
+            # case Begin(body, result):
+            #     pass
             case _:
                 raise Exception('error in rco_exp, unexpected ' + repr(e))
     
@@ -224,6 +339,8 @@ class Compiler:
                 for s in body:
                     body_stmts.extend(self.rco_stmt(s))
                 result.append(While(test_expr, body_stmts, []))
+            case Collect(size):
+                result.append(s)
             case _:
                 raise Exception('error in rco_stmt, unexpected ' + repr(s))
         return result
