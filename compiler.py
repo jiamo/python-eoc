@@ -1,8 +1,13 @@
 import ast
 from ast import *
 from re import T
+
+import x86_ast
 from utils import *
+
 from x86_ast import *
+import bitarray
+import bitarray.util
 from collections import deque
 from functools import reduce
 import os
@@ -30,6 +35,18 @@ op_dict = {
     "!=": "ne",
 }
 
+
+def calculate_tag(size, ty):
+    tag = bitarray.bitarray(64)
+    tag.setall(0)
+    p_mask = 7
+    for i, type in enumerate(ty.types):
+        if type == TupleType:
+            tag[p_mask + i] = 1
+        else:
+            tag[p_mask + i] = 0
+    tag[1:7] = tag[1:7] | bitarray.util.int2ba(size, length=6)
+    return bitarray.util.ba2hex(tag)
 
 class Compiler:
 
@@ -381,8 +398,8 @@ class Compiler:
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
             case _:
-                if str(lhs.id) == 'tmp.0':
-                    print("xxxx")
+                # if str(lhs.id) == 'tmp.0':
+                #     print("xxxx")
                 return [Assign([lhs], rhs)] + cont
 
 
@@ -405,7 +422,7 @@ class Compiler:
                 return new_body
             case _:
                 print("......", e)
-                return []
+                return [] + cont
 
     def explicate_pred(self, cnd: expr, thn: List[stmt], els: List[stmt],
                        basic_blocks: Dict[str, List[stmt]]) -> List[stmt]:
@@ -413,6 +430,8 @@ class Compiler:
             case Compare(left, [op], [right]):
                 goto_thn = create_block(thn, basic_blocks)
                 goto_els = create_block(els, basic_blocks)
+                # breakpoint()
+                print("xxxxxxxxxx")
                 return [If(cnd, [goto_thn], [goto_els])]
             case Constant(True):
                 return thn
@@ -474,6 +493,8 @@ class Compiler:
                 test_stmts =  self.explicate_pred(test, new_body, cont, basic_blocks)
                 basic_blocks[test_label] = test_stmts
                 return [Goto(test_label)]
+            case Collect(size):
+                return [s] + cont
             # case Expr(Call(Name('print'), [arg])):
             #     return [s] + cont
 
@@ -498,7 +519,7 @@ class Compiler:
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 basic_blocks[label_name('start')] = new_body
                 result = CProgram(basic_blocks)
-        f = interp_Cif.InterpCif().interp
+        # f = interp_Cif.InterpCif().interp
         # breakpoint()
         return result
 
@@ -517,6 +538,8 @@ class Compiler:
                 return Immediate(0)
             case Constant(value):
                 return Immediate(value)
+            case x if isinstance(x, int):
+                return Immediate(x)
             case _:
                 raise Exception('error in select_arg, unexpected ' + repr(e))
 
@@ -599,6 +622,35 @@ class Compiler:
                 result.append(Instr('set{}'.format(op_dict[str(op)]), [ByteReg('bl')]))
                 result.append(Instr('movzbq', [ByteReg('bl'), lhs]))
                 pass
+            case Assign([lhs], Call(Name('len'), [arg])):
+                arg = self.select_arg(arg)
+                result.append(Instr('movq', [arg, Reg('r11')]))
+                result.append(Instr('movq', [Deref('r11', 0), Reg('r11')]))
+                result.append(Instr('andq', [Immediate(126), Reg('r11')]))
+                result.append(Instr('sarq', [Immediate(1), Reg('r11')]))
+                result.append(Instr('sarq', [Reg('r11'), lhs]))
+
+            case Assign([lhs], Subscript(value, slice)):
+                lhs = self.select_arg(lhs)
+                value = self.select_arg(value)
+                slice = self.select_arg(slice)  # slice must be int 这里没有必要
+                result.append(Instr('movq', [value, Reg('r11')]))
+                result.append(Instr('movq', [Deref('r11', 8 * (slice.value + 1)), lhs]))
+            case Assign([Subscript(tu, slice)], value):
+                tu = self.select_arg(tu)
+                slice = self.select_arg(slice)
+                value = self.select_arg(value)
+                result.append(Instr('movq', [tu, Reg('r11')]))
+                result.append(Instr('movq', [value, Deref('r11', 8 * (slice.value + 1))]))
+            case Assign([lhs], Allocate(size, ty)):
+                lhs = self.select_arg(lhs)
+
+                size = self.select_arg(size)
+                tag = calculate_tag(size.value, ty)
+                result.append(Instr("movq", [x86_ast.Global("free_ptr"), Reg('r11')]))
+                result.append(Instr("movq", [8 * (size.value + 1) ,  Reg('r11')]))
+                result.append(Instr("movq", [Immediate(tag), Deref('r11', 0)]))
+                result.append(Instr('movq', [Reg('r11'), lhs]))
             case Assign([lhs], value):
                 lhs = self.select_arg(lhs)
                 arg = self.select_arg(value)
@@ -611,6 +663,11 @@ class Compiler:
             case If(expr, [Goto(then_label)], [Goto(else_label)]):
                 if_ = self.select_compare(expr, then_label, else_label)
                 result.extend(if_)
+            case Collect(size):
+                size = self.select_arg(size)
+                result.append(Instr('movq', [Reg('r15'), Reg('%rdi')]))
+                result.append(Instr('movq', [size, Reg('rsi')]))
+                result.append(Callq("collect"))
             case _:
                 raise Exception('error in select_stmt, unexpected ' + repr(s))
         return result
@@ -758,7 +815,8 @@ class Compiler:
         ss = self.blocks[label]
         after_instr_set = live_after_block  # the set after the block
         live_before_block = set()
-
+        if not ss:
+            return set()
         self.live_after[ss[-1]] = after_instr_set
         s = ss[-1]
         match s:
