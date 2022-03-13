@@ -250,6 +250,7 @@ def str_FunctionDef(self):
     if isinstance(self.args, ast.arguments):
         params = ', '.join([a.arg + ':' + str(a.annotation) for a in self.args.args])
     else:
+        # breakpoint()
         params = ', '.join([x + ':' + str(t) for (x,t) in self.args])
     indent()
     if isinstance(self.body, list):
@@ -262,10 +263,14 @@ def str_FunctionDef(self):
             body += ''.join([str(s) for s in ss])
             dedent()
     dedent()
-    return indent_stmt() + 'def ' + self.name + '(' + params + ')' + \
+    # name = self.name.name if isinstance(self.name, FunRef) else self.name
+    return indent_stmt() + 'def ' + str(self.name) + '(' + params + ')' + \
         ' -> ' + str(self.returns) + ':\n' + body + '\n'
 def repr_FunctionDef(self):
-    return 'FunctionDef(' + self.name + ',' + repr(self.args) + ',' + \
+    # breakpoint()
+    # name = self.name.name if isinstance(self.name, FunRef) else self.name
+    # breakpoint()
+    return 'FunctionDef(' + str(self.name) + ',' + repr(self.args) + ',' + \
         repr(self.body) + ')'
 FunctionDef.__str__ = str_FunctionDef
 FunctionDef.__repr__ = repr_FunctionDef
@@ -641,6 +646,18 @@ def compile_and_test(compiler, compiler_name,
     if hasattr(compiler, passname):
         trace('\n# ' + passname + '\n')
         program = compiler.shrink(program)
+        trace(program)
+        trace('')
+        if passname in type_check_dict.keys():
+            type_check_dict[passname](program)
+        total_passes += 1
+        successful_passes += \
+            test_pass(passname, interp_dict, program_root, program, compiler_name)
+
+    passname = 'reveal_functions'
+    if hasattr(compiler, passname):
+        trace('\n# ' + passname + '\n')
+        program = compiler.reveal_functions(program)
         trace(program)
         trace('')
         if passname in type_check_dict.keys():

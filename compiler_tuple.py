@@ -122,252 +122,27 @@ class Compiler:
                 test_expr = self.shrink_exp(test)
                 body = [self.shrink_stmt(s) for s in body]
                 result = While(test_expr, body, [])
-            case Return(value):
-                s_value = self.shrink_exp(value)
-                result = Return(s_value)
             case _:
-                raise Exception('error in shrink_stmt, unexpected ' + repr(s))
+                raise Exception('error in rco_stmt, unexpected ' + repr(s))
         return result
 
     def shrink(self, p: Module) -> Module:
         # YOUR CODE HERE
         trace(p)
         result = []
-        # breakpoint()
-        main_stmts = []
         match p:
             case Module(body):
                 print(body)
                 # breakpoint()
                 for s in body:
-                    match s:
-                        case FunctionDef(name, args, stmts):
-                            # breakpoint()
-                            args = [(arg.arg, arg.annotation, ) for arg in args.args]
-                            result.append(FunctionDef(name, args, [self.shrink_stmt(s) for s in stmts]))
-                        case _:
-                            main_stmts.append(self.shrink_stmt(s))
-
+                    result.append(self.shrink_stmt(s))
+                result = Module(result)
             case _:
                 raise Exception('interp: unexpected ' + repr(p))
-        main_def = FunctionDef("main", [], main_stmts)
-        result.append(main_def)
+
         # breakpoint()
         trace(result)
-        return Module(result)
-
-    def reveal_functions_exp(self, exp, func_map):
-        match exp:
-            case Call(Name(x), args):
-                if x in func_map:
-                    return Call(func_map[x], args)
-                return exp
-            case _:
-                return exp
-
-    def reveal_functions_stmt(self, stmt, func_map):
-        match stmt:
-            case Expr(Call(Name('print'), [arg])):
-                new_arg = self.reveal_functions_exp(arg, func_map)
-                return Expr(Call(Name('print'), [new_arg]))
-            case Expr(value):
-                expr = self.reveal_functions_exp(value, func_map)
-                return Expr(expr)
-            case Assign([lhs], value):
-                v_expr = self.reveal_functions_exp(value, func_map)
-                return Assign([lhs], v_expr)
-            case If(test, body, orelse):
-                test_expr = self.reveal_functions_exp(test, func_map)
-                body_stmts = []
-                for s in body:
-                    body_stmts.append(self.reveal_functions_stmt(s, func_map))
-                orelse_stmts = []
-                for s in orelse:
-                    orelse_stmts.append(self.reveal_functions_stmt(s, func_map))
-                return If(test_expr, body_stmts, orelse_stmts)
-            case While(test, body, []):
-                test_expr = self.reveal_functions_exp(test, func_map)
-                body_stmts = []
-                for s in body:
-                    body_stmts.append(self.reveal_functions_stmt(s, func_map))
-                return While(test_expr, body_stmts, [])
-            case Return(expr):
-                expr = self.reveal_functions_exp(expr, func_map)
-                return Return(expr)
-            # case _:
-            #     return stmt
-
-
-
-
-
-    def reveal_functions(self, p: Module) -> Module:
-        # YOUR CODE HERE
-        trace(p)
-        result = []
-        func_map = {}
-        match p:
-            case Module(body):
-                print(body)
-                # breakpoint()
-                for s in body:
-                    match s:
-                        case FunctionDef(x, args, stmts):
-                            # breakpoint()
-                            n = len(args.args) if isinstance(args, arguments) else len(args)
-                            func_map[x] = FunRef(x, n)
-                            result.append(s)
-            case _:
-                raise Exception('reveal_functions: unexpected ' + repr(p))
-        result = []
-        match p:
-            case Module(body):
-                print(body)
-                # breakpoint()
-                for s in body:
-                    match s:
-                        case FunctionDef(x, args, stmts):
-                            # breakpoint()
-                            result.append(FunctionDef(x, args, [self.reveal_functions_stmt(s, func_map) for s in stmts]))
-            case _:
-                raise Exception('reveal_functions: unexpected ' + repr(p))
-        # breakpoint()
-        trace(result)
-        return Module(result)
-
-    # 改函数和参数一起
-    def limit_functions_exp(self, e, func_arg_map, args_map):
-        match e:
-            case Call(FunRef(name, arth), args):
-                args = [self.limit_functions_exp(i, func_arg_map, args_map)  for i in args]
-
-                if name in func_arg_map:
-                    first = [args[i] for i in range(5)]
-                    after = Tuple([args[i] for i in range(5, len(args))])
-                    return Call(FunRef(name, arth), first + [after])
-                else:
-                    return e
-            case Name(id):
-                if id in args_map:
-                    return args_map[id]
-                else:
-                    return e
-            case BinOp(left, op, right):
-                print(left, op, right)
-                l_expr = self.limit_functions_exp(left, func_arg_map, args_map)
-                r_expr = self.limit_functions_exp(right, func_arg_map, args_map)
-                return_expr = BinOp(l_expr, op, r_expr)
-                return return_expr
-            case UnaryOp(op, v):
-                # one by one
-                v_expr = self.limit_functions_exp(v, func_arg_map, args_map)
-                return UnaryOp(op, v_expr)
-
-            case Compare(left, [cmp], [right]):
-                left_expr = self.limit_functions_exp(left, func_arg_map, args_map)
-                right_expr = self.limit_functions_exp(right, func_arg_map, args_map)
-                return Compare(left_expr, [cmp], [right_expr])
-
-            case IfExp(expr_test, expr_body, expr_orelse):
-                test_expr = self.limit_functions_exp(expr_test, func_arg_map, args_map)
-                body = self.limit_functions_exp(expr_body, func_arg_map, args_map)
-                orelse_expr  = self.limit_functions_exp(expr_orelse, func_arg_map, args_map)
-                return IfExp(test_expr, body, orelse_expr)
-
-            case Subscript(value, slice, ctx):
-                value_expr = self.limit_functions_exp(value, func_arg_map, args_map)
-                slice_expr = self.limit_functions_exp(slice, func_arg_map, args_map)
-                return   Subscript(value_expr, slice_expr, ctx)
-
-                # return Subscript(new_value, slice, ctx)
-            # case Begin(body, result):
-            #     pass
-            case _:
-                raise Exception('limit: unexpected ' + repr(e))
-
-    def limit_functions_stmt(self, stmt, func_args_map, args_map):
-        match stmt:
-            case Expr(Call(Name('print'), [arg])):
-                new_arg = self.limit_functions_exp(arg, func_args_map, args_map)
-                return Expr(Call(Name('print'), [new_arg]))
-            case Expr(value):
-                expr = self.limit_functions_exp(value, func_args_map, args_map)
-                return Expr(expr)
-            case Assign([lhs], value):
-                v_expr = self.limit_functions_exp(value, func_args_map, args_map)
-                return Assign([lhs], v_expr)
-            case If(test, body, orelse):
-                test_expr = self.limit_functions_exp(test, func_args_map, args_map)
-                body_stmts = []
-                for s in body:
-                    body_stmts.append(self.limit_functions_stmt(s, func_args_map, args_map))
-                orelse_stmts = []
-                for s in orelse:
-                    orelse_stmts.append(self.limit_functions_stmt(s, func_args_map, args_map))
-                return If(test_expr, body_stmts, orelse_stmts)
-            case While(test, body, []):
-                test_expr = self.limit_functions_exp(test, func_args_map, args_map)
-                body_stmts = []
-                for s in body:
-                    body_stmts.append(self.limit_functions_stmt(s, func_args_map, args_map))
-                return While(test_expr, body_stmts, [])
-            case Return(expr):
-                expr = self.limit_functions_exp(expr, func_args_map, args_map)
-                return Return(expr)
-
-    def limit_functions(self, p: Module) -> Module:
-        # YOUR CODE HERE
-        trace(p)
-        result = []
-        func_args_map = {}
-        match p:
-            case Module(body):
-                print(body)
-                # breakpoint()
-                for s in body:
-                    match s:
-                        case FunctionDef(x, args, stmts):
-                            # breakpoint()
-                            new_args = []
-                            if len(args) > 6:
-
-                                pass
-                                for i in range(5):
-                                    new_args.append(args[i])
-                                print("... ",i)
-                                breakpoint()
-                                new_args_map = {}
-                                tuple_args = []
-                                for i in range(5, len(args)):
-                                    tuple_args.append(args[i][1])  # this is type signature
-                                    new_args_map[args[i][0]] = Subscript(Name('tup'), Constant(i - 5), Load())
-                                new_args.append(("tup", TupleType(tuple_args)))
-                                func_args_map[x.name] = new_args_map
-                                result.append(FunctionDef(x, new_args, stmts))
-                            else:
-                                result.append(s)
-            case _:
-                raise Exception('reveal_functions: unexpected ' + repr(p))
-        result = []
-        match p:
-            case Module(body):
-                print(body)
-                # breakpoint()
-                for s in body:
-                    match s:
-                        case FunctionDef(FunRef(fun, n), args, stmts):
-                            # breakpoint()
-                            if fun in func_args_map:
-                                args_map = func_args_map[fun]
-                            else:
-                                args_map = {}
-                            result.append(
-                                FunctionDef(FunRef(fun, n), args, [self.limit_functions_stmt(s, func_args_map, args_map) for s in stmts]))
-            case _:
-                raise Exception('reveal_functions: unexpected ' + repr(p))
-        # breakpoint()
-        trace(result)
-        return Module(result)
+        return result
 
     def expose_allocation_exp(self, exp) -> Tupling[expr, List[stmt]]:
         match exp:
