@@ -207,7 +207,7 @@ class Global(arg):
     def __init__(self, name):
         self.name = name
     def __str__(self):
-        return str(self.name) + "(%rip)"
+        return '_' + str(self.name) + "(%rip)"
     def __repr__(self):
         return 'Global(' + repr(self.name) + ')'
     

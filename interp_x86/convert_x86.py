@@ -4,13 +4,13 @@
 from lark import Tree
 from ast import Name, Constant
 from x86_ast import *
-from utils import label_name, GlobalValue
+from utils import label_name, GlobalValue, trace
 
 def convert_int(value):
     if value >= 0:
         return Tree('int_a', [Tree('int_a', [value])])
     else:
-        return Tree('neg_a',[Tree('int_a', [- value])])
+        return Tree('neg_a', [Tree('int_a', [- value])])
 
 def convert_arg(arg):
     match arg:
@@ -24,7 +24,7 @@ def convert_arg(arg):
             return Tree('mem_a', [convert_int(offset), reg])
         case ByteReg(id):
             return Tree('reg_a', [id])
-        case GlobalValue(id):
+        case Global(id):
             return Tree('global_val_a', [id, 'rip'])
         case _:
             raise Exception('convert_arg: unhandled ' + repr(arg))
@@ -32,6 +32,7 @@ def convert_arg(arg):
 def convert_instr(instr):
     match instr:
         case Instr(instr, args):
+            # trace("convert.... {} {}".format( instr, args))
             return Tree(instr, [convert_arg(arg) for arg in args])
         case Callq(func, args):
             return Tree('callq', [func])

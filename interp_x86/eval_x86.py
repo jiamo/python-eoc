@@ -4,6 +4,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from utils import *
+from lark import Tree
 
 from .parser_x86 import x86_parser, x86_parser_instrs
 from .convert_x86 import convert_program
@@ -148,7 +149,12 @@ class X86Emulator:
 
     def eval_imm(self, e):
         if e.data == 'int_a':
+            # breakpoint()
+            # trace(e.children[0])
+            if isinstance(e.children[0], Tree):
+                return self.eval_imm(e.children[0])
             return int(e.children[0])
+            # return self.eval_imm(e.children[0])
         elif e.data == 'neg_a':
             return -self.eval_imm(e.children[0])
         else:
@@ -170,7 +176,28 @@ class X86Emulator:
         elif a.data == 'global_val_a':
             loc, reg = a.children
             assert str(reg) == 'rip', a
-            return self.global_vals[str(loc)]
+            if str(loc) in self.global_vals:
+                return self.global_vals[str(loc)]   # select instr 这里还没有 init
+            else:
+                rootstack_size = 65535
+                heap_size = 65535
+
+                rs_begin = 2000
+                rs_end = rs_begin + rootstack_size
+
+                fromspace_begin = 100000
+                fromspace_end = fromspace_begin + heap_size
+
+                self.global_vals = {**self.global_vals,
+                                    'rootstack_begin': rs_begin,
+                                    'rootstack_end': rs_end,
+                                    'free_ptr': fromspace_begin,
+                                    'fromspace_begin': fromspace_begin,
+                                    'fromspace_end': fromspace_end
+                                    }
+                self.registers['r15'] = self.global_vals['rootstack_begin']
+                return self.global_vals[str(loc)]
+
         else:
             raise RuntimeError(f'Unknown arg in eval_arg: {a}')
 
@@ -213,6 +240,7 @@ class X86Emulator:
 
             elif instr.data == 'movq':
                 a1, a2 = instr.children
+                # trace("trace {} {} {}".format(instr, a1, a2))
                 v = self.eval_arg(a1)
                 self.store_arg(a2, v)
 
@@ -333,7 +361,7 @@ class X86Emulator:
                         print(self.print_state())
 
 
-                elif target == 'collect':
+                elif target == label_name('collect'):
                     self.log(f'CALL TO collect: need {self.registers["rsi"]} bytes')
 
                     needed = self.registers["rsi"]
