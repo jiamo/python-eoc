@@ -6,7 +6,7 @@ class TypeCheckLvar:
   def check_type_equal(self, t1, t2, e):
     if t1 != t2:
       raise Exception('error: ' + repr(t1) + ' != ' + repr(t2) \
-                      + ' in ' + repr(e))
+                      + ' in ' + repr(e) + str(t1) + ' ' + str(t2))
 
   def type_check_exp(self, e, env):
     match e:

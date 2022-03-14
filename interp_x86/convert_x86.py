@@ -36,6 +36,8 @@ def convert_instr(instr):
             return Tree(instr, [convert_arg(arg) for arg in args])
         case Callq(func, args):
             return Tree('callq', [func])
+        case IndirectCallq(func, args):
+            return Tree('callq', [func])
         case Jump(label):
             return Tree('jmp', [label])
         case JumpIf(cc, label):
@@ -44,14 +46,22 @@ def convert_instr(instr):
             raise Exception('error in convert_instr, unhandled ' + repr(instr))
 
 def convert_program(p):
-    if isinstance(p.body, list):
-        main_instrs = [convert_instr(instr) for instr in p.body]
-        main_block = Tree('block', [label_name('main')] + main_instrs)
-        return Tree('prog', [main_block]) 
-    elif isinstance(p.body, dict):
+    if isinstance(p, X86Program):
+        if isinstance(p.body, list):
+            main_instrs = [convert_instr(instr) for instr in p.body]
+            main_block = Tree('block', [label_name('main')] + main_instrs)
+            return Tree('prog', [main_block])
+        elif isinstance(p.body, dict):
+            blocks = []
+            for (l, ss) in p.body.items():
+                blocks.append(Tree('block',
+                                   [l] + [convert_instr(instr) for instr in ss]))
+            return Tree('prog', blocks)
+    elif isinstance(p, X86ProgramDefs):
         blocks = []
-        for (l, ss) in p.body.items():
-            blocks.append(Tree('block',
-                               [l] + [convert_instr(instr) for instr in ss]))
+        for cdef in p.defs:
+            for (l, ss) in cdef.body.items():
+                blocks.append(Tree('block',
+                                   [l] + [convert_instr(instr) for instr in ss]))
+        # breakpoint()
         return Tree('prog', blocks)
-            

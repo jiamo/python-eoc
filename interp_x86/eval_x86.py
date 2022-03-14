@@ -60,7 +60,9 @@ class X86Emulator:
         elif label_name('start') in blocks.keys():
             self.eval_instrs(blocks[label_name('start')], blocks,
                              output)
-            
+        elif label_name('mainstart') in blocks.keys():
+            self.eval_instrs(blocks[label_name('mainstart')], blocks,
+                             output)
 
         self.log('FINAL STATE:')
         if self.logging:
@@ -196,6 +198,10 @@ class X86Emulator:
                                     'fromspace_end': fromspace_end
                                     }
                 self.registers['r15'] = self.global_vals['rootstack_begin']
+                # breakpoint()
+                if str(loc) not in self.global_vals:
+                    # breakpoint()
+                    trace('{}'.format(self.global_vals))
                 return self.global_vals[str(loc)]
 
         else:
@@ -402,7 +408,9 @@ class X86Emulator:
 
             elif instr.data == 'leaq':
                 a1, a2 = instr.children
+                trace('XXXXX {} {} {} '.format(instr, a1, a2))
                 v1 = self.eval_arg(a1)
+
                 assert isinstance(v1, FunPointer)
                 self.store_arg(a2, v1)
 

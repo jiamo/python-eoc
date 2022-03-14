@@ -62,6 +62,7 @@ class TypeCheckLif(TypeCheckLvar):
         self.check_type_equal(BoolType(), test_t, test)
         body_t = self.type_check_stmts(body, env)
         orelse_t = self.type_check_stmts(orelse, env)
+        # breakpoint()
         self.check_type_equal(body_t, orelse_t, ss[0])
         if len(ss) > 1:
           return self.type_check_stmts(ss[1:], env)

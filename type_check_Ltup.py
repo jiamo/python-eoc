@@ -30,8 +30,10 @@ class TypeCheckLtup(TypeCheckLwhile):
         e.has_type = TupleType(ts)
         return e.has_type
       case Subscript(tup, Constant(index), Load()):
+
         tup_ty = self.type_check_exp(tup, env)
         index_ty = self.type_check_exp(Constant(index), env)
+        # breakpoint()
         self.check_type_equal(index_ty, IntType(), index)
         match tup_ty:
           case TupleType(ts):

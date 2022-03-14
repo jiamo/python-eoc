@@ -19,6 +19,8 @@ from typing import Tuple as Tupling
 import type_check_Ltup
 from interp_x86.eval_x86 import interp_x86
 import type_check_Ctup
+import type_check_Lfun
+import type_check_Cfun
 
 
 Binding = Tupling[Name, expr]
@@ -129,6 +131,15 @@ class Compiler:
                 raise Exception('error in shrink_stmt, unexpected ' + repr(s))
         return result
 
+    def convert_type(self, t):
+        match t:
+            case Name('int'):
+                return IntType()
+            case IntType():
+                return t
+            case _:
+                raise Exception('error in convert_type, unexpected ' + repr(t))
+
     def shrink(self, p: Module) -> Module:
         # YOUR CODE HERE
         trace(p)
@@ -141,17 +152,23 @@ class Compiler:
                 # breakpoint()
                 for s in body:
                     match s:
-                        case FunctionDef(name, args, stmts):
+                        case FunctionDef(name, args, stmts, dl, returns, comment):
                             # breakpoint()
-                            args = [(arg.arg, arg.annotation, ) for arg in args.args]
-                            result.append(FunctionDef(name, args, [self.shrink_stmt(s) for s in stmts]))
+                            args = [(arg.arg, self.convert_type(arg.annotation)) for arg in args.args]
+                            result.append(
+                                FunctionDef(name, args, [self.shrink_stmt(s) for s in stmts], dl,
+                                            self.convert_type(returns), comment))
                         case _:
                             main_stmts.append(self.shrink_stmt(s))
 
             case _:
                 raise Exception('interp: unexpected ' + repr(p))
-        main_def = FunctionDef("main", [], main_stmts)
+        # for type typec
+        main_stmts.append(Return(Constant(0)))
+        main_def = FunctionDef("main", [], main_stmts, [], IntType(), None)
+
         result.append(main_def)
+
         # breakpoint()
         trace(result)
         return Module(result)
@@ -199,8 +216,6 @@ class Compiler:
 
 
 
-
-
     def reveal_functions(self, p: Module) -> Module:
         # YOUR CODE HERE
         trace(p)
@@ -212,7 +227,7 @@ class Compiler:
                 # breakpoint()
                 for s in body:
                     match s:
-                        case FunctionDef(x, args, stmts):
+                        case FunctionDef(x, args, stmts, dl, returns, comment):
                             # breakpoint()
                             n = len(args.args) if isinstance(args, arguments) else len(args)
                             func_map[x] = FunRef(x, n)
@@ -226,9 +241,10 @@ class Compiler:
                 # breakpoint()
                 for s in body:
                     match s:
-                        case FunctionDef(x, args, stmts):
+                        case FunctionDef(x, args, stmts, dl, returns, comment):
                             # breakpoint()
-                            result.append(FunctionDef(x, args, [self.reveal_functions_stmt(s, func_map) for s in stmts]))
+                            result.append(
+                                FunctionDef(x, args, [self.reveal_functions_stmt(s, func_map) for s in stmts], dl, returns, comment))
             case _:
                 raise Exception('reveal_functions: unexpected ' + repr(p))
         # breakpoint()
@@ -243,10 +259,12 @@ class Compiler:
 
                 if name in func_arg_map:
                     first = [args[i] for i in range(5)]
-                    after = Tuple([args[i] for i in range(5, len(args))])
-                    return Call(FunRef(name, arth), first + [after])
+                    after = Tuple([args[i] for i in range(5, len(args))], Load())
+                    return Call(FunRef(name, 6), first + [after])
                 else:
                     return e
+            case Constant(v):
+                return e
             case Name(id):
                 if id in args_map:
                     return args_map[id]
@@ -326,7 +344,7 @@ class Compiler:
                 # breakpoint()
                 for s in body:
                     match s:
-                        case FunctionDef(x, args, stmts):
+                        case FunctionDef(x, args, stmts, dl, returns, comment):
                             # breakpoint()
                             new_args = []
                             if len(args) > 6:
@@ -334,43 +352,55 @@ class Compiler:
                                 pass
                                 for i in range(5):
                                     new_args.append(args[i])
-                                print("... ",i)
-                                breakpoint()
+                                print("... ", i)
+                                # breakpoint()
                                 new_args_map = {}
                                 tuple_args = []
                                 for i in range(5, len(args)):
-                                    tuple_args.append(args[i][1])  # this is type signature
+                                    tuple_args.append(self.convert_type(args[i][1]))  # this is type signature
                                     new_args_map[args[i][0]] = Subscript(Name('tup'), Constant(i - 5), Load())
                                 new_args.append(("tup", TupleType(tuple_args)))
-                                func_args_map[x.name] = new_args_map
-                                result.append(FunctionDef(x, new_args, stmts))
+                                func_args_map[x] = new_args_map
+                                result.append(FunctionDef(x, new_args, stmts, dl, returns, comment))
                             else:
                                 result.append(s)
             case _:
                 raise Exception('reveal_functions: unexpected ' + repr(p))
-        result = []
-        match p:
-            case Module(body):
-                print(body)
-                # breakpoint()
-                for s in body:
-                    match s:
-                        case FunctionDef(FunRef(fun, n), args, stmts):
-                            # breakpoint()
-                            if fun in func_args_map:
-                                args_map = func_args_map[fun]
-                            else:
-                                args_map = {}
-                            result.append(
-                                FunctionDef(FunRef(fun, n), args, [self.limit_functions_stmt(s, func_args_map, args_map) for s in stmts]))
-            case _:
-                raise Exception('reveal_functions: unexpected ' + repr(p))
+
+        new_result = []
+
+        for s in result:
+            match s:
+                case FunctionDef(fun, args, stmts, dl, returns, comment):
+                    # breakpoint()
+                    if fun in func_args_map:
+                        args_map = func_args_map[fun]
+                    else:
+                        args_map = {}
+                    new_result.append(
+                        FunctionDef(fun, args, [self.limit_functions_stmt(s, func_args_map, args_map) for s in stmts],
+                                    dl, returns, comment))
+                case _:
+                    raise Exception('limit_functions: unexpected ' + repr(s))
+
+
         # breakpoint()
-        trace(result)
-        return Module(result)
+        trace("limit function {}".format(new_result))
+        return Module(new_result)
 
     def expose_allocation_exp(self, exp) -> Tupling[expr, List[stmt]]:
         match exp:
+            case Call(x, args):
+
+                stmts = []
+                new_args = []
+                for arg in args:
+                    new_arg, arg_stmts = self.expose_allocation_exp(arg)
+                    stmts.extend(arg_stmts)
+                    new_args.append(new_arg)
+                # breakpoint()
+                return Call(x, new_args), stmts
+
             case Subscript(value, slice, ctx):
                 new_value, stmts = self.expose_allocation_exp(value)
                 return Subscript(new_value, slice, ctx), stmts
@@ -432,22 +462,29 @@ class Compiler:
                 for s in body:
                     body_stmts.extend(self.expose_allocation_stmt(s))
                 return stmts + [While(test_expr, body_stmts, [])]
-            # case _:
-            #     raise Exception('error in rco_stmt, unexpected ' + repr(s))
+            case Return(value):
+                expr, stmts = self.expose_allocation_exp(value)
+                return stmts + [Return(expr)]
+            case _:
+                raise Exception('error in expose_allocation_stmt, unexpected ' + repr(s))
         # return result
 
     def expose_allocation(self, p):
         # YOUR CODE HERE
         # trace(p)
-        type_check_Ltup.TypeCheckLtup().type_check(p)
+        type_check_Lfun.TypeCheckLfun().type_check(p)
         result = []
         match p:
             case Module(body):
-                print(body)
                 # breakpoint()
                 for s in body:
                     # breakpoint()
-                    result.extend(self.expose_allocation_stmt(s))
+                    match s:
+                        case FunctionDef(fun, args, stmts, dl, returns, comment):
+                            new_stmts = []
+                            for s in stmts:
+                                new_stmts.extend(self.expose_allocation_stmt(s))
+                            result.append(FunctionDef(fun, args, new_stmts, dl, returns, comment))
                 result = Module(result)
             case _:
                 raise Exception('interp: unexpected ' + repr(p))
@@ -540,6 +577,24 @@ class Compiler:
                 else:
                     return return_expr, value_tmps
                 # return Subscript(new_value, slice, ctx)
+            case Call(FunRef(n, art), args):
+                # 	fun.0 = add(%rip)
+                # 	tmp.1 = fun.0(40, 2)
+                new_args = []
+                new_tmps = []
+                fun_tmp = Name(generate_name("fun"))
+                new_tmps.append((fun_tmp, FunRef(n, art)))
+                for arg in args:
+                    arg_expr, arg_tmps = self.rco_exp(arg, True)
+                    new_args.append(arg_expr)
+                    new_tmps.extend(arg_tmps)
+                return_expr = Call(fun_tmp, new_args)
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    new_tmps.append((tmp, return_expr))
+                    return tmp, new_tmps
+                else:
+                    return return_expr, new_tmps
             # case Begin(body, result):
             #     pass
             case _:
@@ -588,6 +643,11 @@ class Compiler:
                 result.append(While(test_expr, body_stmts, []))
             case Collect(size):
                 result.append(s)
+            case Return(value):
+                value_expr, value_tmps = self.rco_exp(value, True)
+                for name, t_expr in value_tmps:
+                    result.append(Assign([name], t_expr))
+                result.append(Return(value_expr))
             case _:
                 raise Exception('error in rco_stmt, unexpected ' + repr(s))
         return result
@@ -598,10 +658,15 @@ class Compiler:
         result = []
         match p:
             case Module(body):
-                print(body)
                 # breakpoint()
                 for s in body:
-                    result.extend(self.rco_stmt(s))
+                    # breakpoint()
+                    match s:
+                        case FunctionDef(fun, args, stmts, dl, returns, comment):
+                            new_stmts = []
+                            for s in stmts:
+                                new_stmts.extend(self.rco_stmt(s))
+                            result.append(FunctionDef(fun, args, new_stmts, dl, returns, comment))
                 result = Module(result)
             case _:
                 raise Exception('interp: unexpected ' + repr(p))
@@ -630,6 +695,8 @@ class Compiler:
             case _:
                 # if str(lhs.id) == 'tmp.0':
                 #     print("xxxx")
+                # breakpoint()
+                # 这里
                 return [Assign([lhs], rhs)] + cont
 
 
@@ -691,6 +758,27 @@ class Compiler:
                         [create_block(els, basic_blocks)],
                         [create_block(thn, basic_blocks)])]
 
+    def explicate_tail(self, exp, basic_blocks) ->  List[stmt]:
+        match exp:
+            case Call(fun, args):
+                return [TailCall(fun, args)]
+            case Begin(body, result):
+                the_result_stmts = self.explicate_tail(result, basic_blocks)
+                for s in reversed(body):
+                    the_result_stmts = self.explicate_stmt(s, the_result_stmts, basic_blocks)
+                return the_result_stmts
+            case IfExp(test, body, orelse):
+                # TODO
+                # Return
+                # goto_thn = create_block(thn, basic_blocks)
+                # goto_els = create_block(els, basic_blocks)
+                body = self.explicate_tail(body, basic_blocks)
+                orelse = self.explicate_tail(orelse, basic_blocks)
+                goto_thn_out = create_block(body, basic_blocks)
+                goto_els_out = create_block(orelse, basic_blocks)
+                return [If(test, [goto_thn_out], [goto_els_out])]
+            case _:
+                return [Return(exp)]
 
     def explicate_stmt(self, s: stmt, cont: List[stmt],
                        basic_blocks: Dict[str, List[stmt]]) -> List[stmt]:
@@ -725,32 +813,43 @@ class Compiler:
                 return [Goto(test_label)]
             case Collect(size):
                 return [s] + cont
+            case Return(value):
+                # return always the last
+                return self.explicate_tail(value, basic_blocks)
             # case Expr(Call(Name('print'), [arg])):
             #     return [s] + cont
 
     def explicate_control(self, p):
+        result = []
         match p:
             case Module(body):
-                basic_blocks = {}
-                conclusion = []
-                conclusion.extend([
-                    Return(Constant(0)),
-                ])
-                basic_blocks[label_name("conclusion")] = conclusion
+                for s in body:
+                    # breakpoint()
+                    match s:
+                        case FunctionDef(fun, args, stmts, dl, returns, comment):
 
-                # blocks[self.sort_cfg[-1]][-1] = Jump(label_name("conclusion"))
-                new_body = [Goto(label_name("conclusion"))]
-                # 也许这里是一个 newblock conclude = block(Return(Constant(0))])
-                # create_block 是 goto 那个 bloc
-                # conclude 这里是从那里 goto 到这里
+                            basic_blocks = {}
+                            conclusion = []
+                            conclusion.extend([
+                                Return(Constant(0)),
+                            ])
+                            basic_blocks[label_name("{}conclusion".format(fun))] = conclusion
 
-                for s in reversed(body):
-                    # the new_body was after s we need do the new_body
-                    new_body = self.explicate_stmt(s, new_body, basic_blocks)
-                basic_blocks[label_name('start')] = new_body
-                result = CProgram(basic_blocks)
+                            # blocks[self.sort_cfg[-1]][-1] = Jump(label_name("conclusion"))
+                            new_body = [Goto(label_name("{}conclusion".format(fun)))]
+                            # 也许这里是一个 newblock conclude = block(Return(Constant(0))])
+                            # create_block 是 goto 那个 bloc
+                            # conclude 这里是从那里 goto 到这里
+
+                            for s in reversed(stmts):
+                                # the new_body was after s we need do the new_body
+                                new_body = self.explicate_stmt(s, new_body, basic_blocks)
+                            basic_blocks[label_name('{}start'.format(fun))] = new_body
+                            result.append(FunctionDef(fun, args, basic_blocks, dl, returns, comment))
+
         # f = interp_Cif.InterpCif().interp
         # breakpoint()
+        result = CProgramDefs(result)
         return result
 
     ############################################################################
@@ -770,6 +869,9 @@ class Compiler:
                 return Immediate(0)
             case Constant(value):
                 return Immediate(value)
+            # case FunRef(name, arith):
+            #     # breakpoint()
+            #     return Instr('leaq', [x86_ast.Global(name),])
             # case x if isinstance(x, int):
             #     return Immediate(x)
             case _:
@@ -799,6 +901,7 @@ class Compiler:
                 arg = self.select_arg(arg)
                 result.append(Instr('movq', [arg, Reg("rdi")]))
                 result.append(Callq(label_name("print_int"), 1))
+
             case Expr(value):
                 # don't need do more on value
                 result.append(Instr('movq', [value, Reg("rax")]))
@@ -826,6 +929,10 @@ class Compiler:
                 else:
                     result.append(Instr('movq', [left_arg, lhs]))
                     result.append(Instr('subq', [right_arg, lhs]))
+            case Assign([lhs], FunRef(name, arith)):
+                lhs = self.select_arg(lhs)
+                # breakpoint()
+                result.append(Instr('leaq', [x86_ast.Global("{}".format(name)), lhs]))
             case Assign([lhs], UnaryOp(USub(), v)):
                 arg = self.select_arg(v)
                 lhs = self.select_arg(lhs)
@@ -838,6 +945,20 @@ class Compiler:
                 lhs = self.select_arg(lhs)
                 result.append(Callq(label_name("read_int"), 0))
                 result.append(Instr('movq', [Reg('rax'), lhs]))
+            case Assign([lhs], Call(fun, args)):
+                lhs = self.select_arg(lhs)
+                for i, arg in enumerate(args):
+                    arg = self.select_arg(arg)
+                    result.append(Instr('movq', [arg, arg_regs[i]]))
+                result.append(IndirectCallq(fun, len(args)))
+                result.append(Instr('movq', [Reg('rax'), lhs]))
+            case Assign([lhs], TailCall(fun, args)):
+                lhs = self.select_arg(lhs)
+                for i, arg in enumerate(args):
+                    arg = self.select_arg(arg)
+                    result.append(Instr('movq', [arg, arg_regs[i]]))
+                result.append(TailJump(fun, len(args)))
+                # result.append(Instr('movq', [Reg('rax'), lhs]))
             case Assign([lhs], UnaryOp(Not(), rhs)) if rhs == rhs:
                 lhs = self.select_arg(lhs)
                 result.append(Instr('xorq',[Immediate(1), lhs]))
@@ -900,6 +1021,10 @@ class Compiler:
                 result.append(Instr('movq', [Reg('r15'), Reg('rdi')]))
                 result.append(Instr('movq', [Immediate(size), Reg('rsi')]))
                 result.append(Callq(label_name("collect"), 2))
+            case Return(value):
+                value = self.select_arg(value)
+                result.append(Instr('movq', [value, Reg('rax')]))
+                result.append(Jump(self.tmp_concluation))
             case _:
                 raise Exception('error in select_stmt, unexpected ' + repr(s))
         return result
@@ -907,26 +1032,40 @@ class Compiler:
 
     def select_instructions(self, p: Module) -> X86Program:
         # YOUR CODE HERE
-        type_check_Ctup.TypeCheckCtup().type_check(p)
+        type_check_Cfun.TypeCheckCfun().type_check(p)
         # breakpoint()
-        blocks = {}
+        # arg_regs
+        result = []
         match p:
-            case CProgram(basic_blocks):
-                for label, body in basic_blocks.items():
-                    instr_body = []
-                    for s in body:
-                        instr_body.extend(self.select_stmt(s))
-                    blocks[label] = instr_body
-            case _:
-                raise Exception('interp: unexpected ' + repr(p))
+            case CProgramDefs(cdefs):
+                for cdef in cdefs:
+                    match cdef:
+                        case FunctionDef(fun, args, basic_blocks, dl, returns, comment):
+                            blocks = {}
+                            args_start = []
+                            self.tmp_concluation = generate_name(label_name("{}conclusion".format(fun)))
+                            for i, arg in enumerate(args):
+                                args_start.append(Instr('movq', [arg_regs[i], Variable(arg[0])]))
 
+                            for label, body in basic_blocks.items():
+                                instr_body = []
+                                for s in body:
+                                    instr_body.extend(self.select_stmt(s))
+                                blocks[label] = instr_body
 
-        x86 = X86Program(blocks)
-        x86.var_types =  p.var_types
-        # breakpoint()
-        # print("......")
-        # interp_x86(x86)
-        # print("......")
+                            blocks[label_name('{}start'.format(fun))] = args_start + blocks[label_name('{}start'.format(fun))]
+                            # for only test
+                            blocks[label_name('{}'.format(fun))] = [Jump(label_name('{}start'.format(fun)))]
+
+                            ndef = FunctionDef(fun, [], blocks, dl, returns, comment)
+
+                            ndef.var_types = cdef.var_types
+                            result.append(ndef)
+
+                        case _:
+                            raise Exception('interp: unexpected ' + repr(p))
+
+        x86 = X86ProgramDefs(result)
         return x86
 
     ############################################################################
@@ -1405,6 +1544,7 @@ class Compiler:
                     main.append( Instr("movq", [Immediate(0), Deref("r15", 8 * i)]))
                 main.append(Instr('addq', [Immediate(8 * len_spill_r15), Reg('r15')]))
                 main.append(Jump(label_name("start")))
+
                 blocks[label_name("main")] = main
                 # for label , body in blocks.items():
                 #     pass
@@ -1416,6 +1556,8 @@ class Compiler:
                 for reg in extra_saved_regs[::-1]:
                     conclusion.append(Instr("popq", [reg]))
                 conclusion.append(Instr("popq", [Reg('rbp')]))  # seem no need pop
+
+                # just replace
                 blocks[label_name("conclusion")] = conclusion + blocks[label_name("conclusion")]
 
                 # conclusion.extend([

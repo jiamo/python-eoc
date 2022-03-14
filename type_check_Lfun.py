@@ -98,6 +98,7 @@ class TypeCheckLfun(TypeCheckLtup):
         for (x,t) in new_params:
             new_env[x] = t
         rt = self.type_check_stmts(body, new_env)
+        # breakpoint()
         self.check_type_equal(new_returns, rt, ss[0])
         return self.type_check_stmts(ss[1:], env)
       case Return(value):

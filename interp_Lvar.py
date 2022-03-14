@@ -16,6 +16,7 @@ class InterpLvar(InterpLint):
             return
         match ss[0]:
             case Assign([lhs], value):
+                trace("{}".format(ss[0]))
                 env[lhs.id] = self.interp_exp(value, env)
                 return self.interp_stmts(ss[1:], env)
             case _:

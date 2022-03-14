@@ -43,8 +43,7 @@ class InterpLfun(InterpLtup):
     match ss[0]:
       case Return(value):
         return self.interp_exp(value, env)
-      #case FunctionDef(name, params, bod, dl, returns, comment):
-      case FunctionDef(name, params, bod):
+      case FunctionDef(name, params, bod, dl, returns, comment):
         if isinstance(params, ast.arguments):
             ps = [p.arg for p in params.args]
         else:
