@@ -26,6 +26,8 @@ def convert_arg(arg):
             return Tree('reg_a', [id])
         case Global(id):
             return Tree('global_val_a', [id, 'rip'])
+        case x if isinstance(x, str):
+            return x
         case _:
             raise Exception('convert_arg: unhandled ' + repr(arg))
 
@@ -35,9 +37,9 @@ def convert_instr(instr):
             # trace("convert.... {} {}".format( instr, args))
             return Tree(instr, [convert_arg(arg) for arg in args])
         case Callq(func, args):
-            return Tree('callq', [func])
+            return Tree('callq', [convert_arg(func)])
         case IndirectCallq(func, args):
-            return Tree('callq', [func])
+            return Tree('indirect_callq', [convert_arg(func)])
         case Jump(label):
             return Tree('jmp', [label])
         case JumpIf(cc, label):

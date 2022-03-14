@@ -177,9 +177,12 @@ class X86Emulator:
             return self.memory[offset_addr]
         elif a.data == 'global_val_a':
             loc, reg = a.children
+            try_loc = '_{}'.format(loc)
             assert str(reg) == 'rip', a
             if str(loc) in self.global_vals:
                 return self.global_vals[str(loc)]   # select instr 这里还没有 init
+            elif try_loc in self.global_vals:
+                return self.global_vals[try_loc]
             else:
                 rootstack_size = 65535
                 heap_size = 65535
@@ -201,7 +204,8 @@ class X86Emulator:
                 # breakpoint()
                 if str(loc) not in self.global_vals:
                     # breakpoint()
-                    trace('{}'.format(self.global_vals))
+                    pass
+                    # trace('{}'.format(self.global_vals))
                 return self.global_vals[str(loc)]
 
         else:
@@ -387,6 +391,7 @@ class X86Emulator:
                         print(self.print_state())
 
                 else:
+                    # trace("#### {}".format(target))
                     self.eval_instrs(blocks[target], blocks, output)
 
             elif instr.data == 'retq':
@@ -408,13 +413,14 @@ class X86Emulator:
 
             elif instr.data == 'leaq':
                 a1, a2 = instr.children
-                trace('XXXXX {} {} {} '.format(instr, a1, a2))
+                # trace('XXXXX {} {} {} '.format(instr, a1, a2))
                 v1 = self.eval_arg(a1)
 
                 assert isinstance(v1, FunPointer)
                 self.store_arg(a2, v1)
 
             elif instr.data == 'indirect_callq':
+                # trace("&&&& {} {}".format(instr, instr.children[0]))
                 v = self.eval_arg(instr.children[0])
                 assert isinstance(v, FunPointer)
                 target = v.fun_name

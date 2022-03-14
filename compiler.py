@@ -831,7 +831,7 @@ class Compiler:
                             basic_blocks = {}
                             conclusion = []
                             conclusion.extend([
-                                Return(Constant(0)),
+                                #Return(Constant(0)),
                             ])
                             basic_blocks[label_name("{}conclusion".format(fun))] = conclusion
 
@@ -950,7 +950,10 @@ class Compiler:
                 for i, arg in enumerate(args):
                     arg = self.select_arg(arg)
                     result.append(Instr('movq', [arg, arg_regs[i]]))
+                # here cost my 1hour to findoutout
+                fun = self.select_arg(fun)
                 result.append(IndirectCallq(fun, len(args)))
+
                 result.append(Instr('movq', [Reg('rax'), lhs]))
             case Assign([lhs], TailCall(fun, args)):
                 lhs = self.select_arg(lhs)
@@ -1043,7 +1046,7 @@ class Compiler:
                         case FunctionDef(fun, args, basic_blocks, dl, returns, comment):
                             blocks = {}
                             args_start = []
-                            self.tmp_concluation = generate_name(label_name("{}conclusion".format(fun)))
+                            self.tmp_concluation = label_name("{}conclusion".format(fun))
                             for i, arg in enumerate(args):
                                 args_start.append(Instr('movq', [arg_regs[i], Variable(arg[0])]))
 
