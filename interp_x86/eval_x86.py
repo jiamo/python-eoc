@@ -348,7 +348,7 @@ class X86Emulator:
                     if self.logging:
                         print(self.print_state())
                     
-                elif target == 'initialize':
+                elif target == 'initialize' or target == '_initialize':
                     self.log(f'CALL TO initialize: {self.registers["rdi"]}, {self.registers["rsi"]}')
                     rootstack_size = self.registers['rdi']
                     heap_size = self.registers['rsi']
@@ -422,12 +422,16 @@ class X86Emulator:
             elif instr.data == 'indirect_callq':
                 # trace("&&&& {} {}".format(instr, instr.children[0]))
                 v = self.eval_arg(instr.children[0])
+                # trace('{} {}'.format(blocks.keys(), v))
+
                 assert isinstance(v, FunPointer)
                 target = v.fun_name
                 self.eval_instrs(blocks[target], blocks, output)
 
             elif instr.data == 'indirect_jmp':
+
                 v = self.eval_arg(instr.children[0])
+                # trace("&&&& {} {}".format(instr, instr.children[0], v))
                 assert isinstance(v, FunPointer)
                 target = v.fun_name
                 self.eval_instrs(blocks[target], blocks, output)

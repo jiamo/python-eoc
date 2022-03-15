@@ -63,7 +63,7 @@ class Callq(instr):
         self.func = func
         self.num_args = num_args
     def __str__(self):
-        return indent_stmt() + 'callq' + ' ' + self.func + '\n'
+        return indent_stmt() + 'callq' + ' ' + str(self.func) + '\n'
     def __repr__(self):
         return 'Callq(' + repr(self.func) + ', ' + repr(self.num_args) + ')'
 
@@ -116,8 +116,10 @@ class TailJump(instr):
     def __init__(self, func, arity):
         self.func = func
         self.arity = arity
+    # def __str__(self):
+    #     return indent_stmt() + 'tailjmp ' + str(self.func) + '\n'
     def __str__(self):
-        return indent_stmt() + 'tailjmp ' + str(self.func) + '\n'
+        return indent_stmt() + 'jmp *' + str(self.func) + '\n'
     def __repr__(self):
         return 'TailJump(' + repr(self.func) + ',' + repr(self.arity) + ')'
     

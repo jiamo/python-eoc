@@ -42,6 +42,8 @@ def convert_instr(instr):
             return Tree('indirect_callq', [convert_arg(func)])
         case Jump(label):
             return Tree('jmp', [label])
+        case TailJump(fun, arg):
+            return Tree('indirect_jmp', [convert_arg(fun)])
         case JumpIf(cc, label):
             return Tree('j' + cc, [label])
         case _:

@@ -589,7 +589,8 @@ class Compiler:
                     new_args.append(arg_expr)
                     new_tmps.extend(arg_tmps)
                 return_expr = Call(fun_tmp, new_args)
-                if need_atomic:
+                if need_atomic and (not self.optimse_tail):
+                # if need_atomic:
                     tmp = Name(generate_name("tmp"))
                     new_tmps.append((tmp, return_expr))
                     return tmp, new_tmps
@@ -604,6 +605,7 @@ class Compiler:
         # YOUR CODE HERE
         result = []
         # breakpoint()
+        self.optimse_tail = False
         match s:
             case Expr(Call(Name('print'), [arg])):
                 arg_expr, arg_tmps = self.rco_exp(arg, True)
@@ -644,6 +646,9 @@ class Compiler:
             case Collect(size):
                 result.append(s)
             case Return(value):
+                # the tail call need the it to be false
+                # 为了调试可以先不这样
+                self.optimse_tail = True
                 value_expr, value_tmps = self.rco_exp(value, True)
                 for name, t_expr in value_tmps:
                     result.append(Assign([name], t_expr))
@@ -761,7 +766,8 @@ class Compiler:
     def explicate_tail(self, exp, basic_blocks) ->  List[stmt]:
         match exp:
             case Call(fun, args):
-                return [TailCall(fun, args)]
+                # breakpoint()
+                return [Return(TailCall(fun, args))]
             case Begin(body, result):
                 the_result_stmts = self.explicate_tail(result, basic_blocks)
                 for s in reversed(body):
@@ -778,6 +784,7 @@ class Compiler:
                 goto_els_out = create_block(orelse, basic_blocks)
                 return [If(test, [goto_thn_out], [goto_els_out])]
             case _:
+                # breakpoint()
                 return [Return(exp)]
 
     def explicate_stmt(self, s: stmt, cont: List[stmt],
@@ -955,8 +962,10 @@ class Compiler:
                 result.append(IndirectCallq(fun, len(args)))
 
                 result.append(Instr('movq', [Reg('rax'), lhs]))
-            case Assign([lhs], TailCall(fun, args)):
-                lhs = self.select_arg(lhs)
+            case Return(TailCall(fun, args)):
+                # breakpoint()
+                # lhs = self.select_arg(lhs)
+                fun = self.select_arg(fun)
                 for i, arg in enumerate(args):
                     arg = self.select_arg(arg)
                     result.append(Instr('movq', [arg, arg_regs[i]]))
@@ -1011,9 +1020,9 @@ class Compiler:
                 lhs = self.select_arg(lhs)
                 arg = self.select_arg(value)
                 result.append(Instr('movq', [arg, lhs]))
-            case Return(Constant(value)):
-                result.append(Instr('movq', [self.select_arg(Constant(value)), Reg('rax')]))
-                result.append(Instr('retq', []))
+            # case Return(Constant(value)):
+            #     result.append(Instr('movq', [self.select_arg(Constant(value)), Reg('rax')]))
+            #     result.append(Instr('retq', []))
             case Goto(label):
                 result.append(Jump(label))
             case If(expr, [Goto(then_label)], [Goto(else_label)]):
@@ -1151,6 +1160,10 @@ class Compiler:
                 return t
             case Deref(r, offset):
                 return Reg(r)
+            case TailJump(func, n):
+                return arg_regs[:n]
+            case IndirectCallq(func, n):
+                return arg_regs[:n]
             case _:
                 return set()
 
@@ -1159,7 +1172,11 @@ class Compiler:
             case Instr("movq", [s, t]):
                 return set([self.free_var(t)])
             case Callq(func, num_args):
-                return set(callee_saved_regs)
+                return set(caller_saved_regs)
+            case IndirectCallq(func, num_args):
+                return set(caller_saved_regs)
+            case Instr('leaq', [s, t]):
+                return set([self.free_var(t)])
             case _:
                 return set()
 
@@ -1316,10 +1333,12 @@ class Compiler:
         # first make it k big enough
         valid_colors = list(range(0, k))  # number of colar
         # Rdi 的保存问题
+        # arg_regs = [Reg("rdi"), Reg("rsi"), Reg("rdx"), Reg("rcx"), Reg("r8"), Reg("r9")]
         color_map = {
             Reg('rax'): -1, Reg('rsp'): -2, Reg('rdi'): -3, ByteReg('bl'): -4, Reg('r11'): -5,
-            Reg('r15'): -6, Reg('rsi'): -7 # rsi 其实可以用来做其他事情。 但如果分配 rsi 9  rsi 的 color
+            Reg('r15'): -6, Reg('rsi'): -7 ,# rsi 其实可以用来做其他事情。 但如果分配 rsi 9  rsi 的 color
             # 算法 color 9 和 可以分配出去reg 的color 0 1 3 矛盾
+            Reg('rdx'): -8,  Reg('rcx'): -9,  Reg('r8'): -10,  Reg('r9'): -11
         }
         # color_map = {}
         saturated = {}
@@ -1369,92 +1388,124 @@ class Compiler:
 
         # breakpoint()
         # ? RDI
-        self.color_regs = [Reg("rbx"), Reg("rcx"), Reg("rdx"), Reg("rsi"),
-                           Reg("rdi"), Reg("r8"), Reg("r9"), Reg("r10")]
-        self.color_regs = [Reg("rbx"), Reg("rcx")]
-        self.color_regs = [Reg("rbx")]
-        # rcx as tmp
-        self.color_regs = [Reg("rbx"), Reg("rcx"), Reg("r8")]
 
-        self.alloc_callee_saved_regs = list(set(self.color_regs).intersection(callee_saved_regs))
-        self.C = len(self.alloc_callee_saved_regs)
-        # used_regs = 1
-        color_regs_map = {i: reg for i, reg in enumerate(self.color_regs)}
-        color_regs_map[-1] = Reg('rax')
-        color_regs_map[-2] = Reg('rsp')
-        color_regs_map[-3] = Reg('rdi')
-        color_regs_map[-4] = ByteReg("bl")
-        color_regs_map[-5] = Reg('r11')
-        color_regs_map[-6] = Reg('r15')
-        color_regs_map[-7] = Reg('rsi')
-        self.real_color_map = {}
 
         match(p):
-            case X86Program(blocks):
+            case X86ProgramDefs(defs):
 
                 # breakpoint()
-                new_blocks = {}
-                color_map = self.color_graph(blocks)
+                for cdef in defs:
+                    cdef.color_regs = [Reg("rbx"), Reg("rcx"), Reg("rdx"), Reg("rsi"),
+                                       Reg("rdi"), Reg("r8"), Reg("r9"), Reg("r10")]
+                    cdef.color_regs = [Reg("rbx"), Reg("rcx")]
+                    cdef.color_regs = [Reg("rbx")]
+                    # rcx as tmp
+                    cdef.color_regs = [Reg("rbx"), Reg("r10")]
+
+                    cdef.alloc_callee_saved_regs = list(set(cdef.color_regs).intersection(callee_saved_regs))
+                    cdef.C = len(cdef.alloc_callee_saved_regs)
+                    # used_regs = 1
+                    color_regs_map = {i: reg for i, reg in enumerate(cdef.color_regs)}
+                    color_regs_map[-1] = Reg('rax')
+                    color_regs_map[-2] = Reg('rsp')
+                    color_regs_map[-3] = Reg('rdi')
+                    color_regs_map[-4] = ByteReg("bl")
+                    color_regs_map[-5] = Reg('r11')
+                    color_regs_map[-6] = Reg('r15')
+                    color_regs_map[-7] = Reg('rsi')
+
+                    color_regs_map[-8] = Reg('rdx')
+                    color_regs_map[-9] = Reg('rcx')
+                    color_regs_map[-10] = Reg('r8')
+                    color_regs_map[-11] = Reg('r9')
+                    # arg_regs = [Reg("rdi"), Reg("rsi"), Reg("rdx"), Reg("rcx"), Reg("r8"), Reg("r9")]
+
+                    cdef.real_color_map = {}
+                    blocks = cdef.body
+
+                    new_blocks = {}
+                    color_map = self.color_graph(blocks)
 
 
-                print("color_map", color_map)
-                so_far_rbp = 0
-                so_far_r15 = 0
-                self.rbp_spill = set()
-                self.r15_spill = set()
-                for var, color in sorted(color_map.items(), key=lambda i: i[1]):
-                    # 相同的 color 但 type 不一样
-                    if color in self.real_color_map:
-                        continue
-                    if color in color_regs_map:
-                        self.real_color_map[color] = color_regs_map[color]
-                    else:
-                        # Yes
-                        # breakpoint()
-                        if isinstance(p.var_types.get(str(var)), TupleType):
-                            # breakpoint()
-                            # r15 is up r15 was saveid in heap
-                            self.real_color_map[color] = Deref("r15", 8*(so_far_r15))
-                            so_far_r15 += 1
-                            self.r15_spill.add(color)
+                    print("color_map", color_map)
+                    so_far_rbp = 0
+                    so_far_r15 = 0
+                    cdef.rbp_spill = set()
+                    cdef.r15_spill = set()
+                    for var, color in sorted(color_map.items(), key=lambda i: i[1]):
+                        # 相同的 color 但 type 不一样
+                        if color in cdef.real_color_map:
+                            continue
+                        if color in color_regs_map:
+                            cdef.real_color_map[color] = color_regs_map[color]
                         else:
-                            self.real_color_map[color] = Deref("rbp", -8*(so_far_rbp+ self.C + 1))
-                            so_far_rbp += 1
-                            self.rbp_spill.add(color)
-
-                self.S = len(self.rbp_spill)
-                if self.r15_spill.intersection(self.rbp_spill):
-                    print("r15 and rbp have somecolor", )
-                    sys.exit(-1)
-
-                print("real_color_map", self.real_color_map)
-
-                for label, ss in self.blocks.items():
-                    ss = blocks[label]
-                    result = []
-                    for s in ss:
-                        match(s):
-                            case Instr(op, [source, target]):
+                            # Yes
+                            # breakpoint()
+                            if isinstance(cdef.var_types.get(str(var)), TupleType):
                                 # breakpoint()
-                                if (color := color_map.get(source)) is not None:
-                                    source = self.real_color_map[color]
-                                if (color := color_map.get(target)) is not None:
-                                    target = self.real_color_map[color]
-                                result.append(Instr(op, [source, target]))
-                            case Instr(op, [source]):
-                                if (color := color_map.get(source)) is not None:
-                                    source = self.real_color_map[color]
-                                result.append(Instr(op, [source]))
-                            case _:
-                                result.append(s)
-                    new_blocks[label] = result
+                                # r15 is up r15 was saveid in heap
+                                cdef.real_color_map[color] = Deref("r15", 8*(so_far_r15))
+                                so_far_r15 += 1
+                                cdef.r15_spill.add(color)
+                            else:
+                                cdef.real_color_map[color] = Deref("rbp", -8*(so_far_rbp + cdef.C + 1))
+                                so_far_rbp += 1
+                                cdef.rbp_spill.add(color)
 
-        # breakpoint()
-        # breakpoint()
+                    cdef.S = len(cdef.rbp_spill)
+                    if cdef.r15_spill.intersection(cdef.rbp_spill):
+                        print("r15 and rbp have somecolor", )
+                        sys.exit(-1)
 
-        self.rsp_sub = align(8 * self.S + 8 * self.C, 16) - 8 * self.C
+                    print("real_color_map", cdef.real_color_map)
 
-        return X86Program(new_blocks)
+                    for label, ss in blocks.items():
+                        ss = blocks[label]
+                        result = []
+                        for s in ss:
+                            match(s):
+                                case Instr(op, [source, target]):
+                                    # breakpoint()
+                                    if (color := color_map.get(source)) is not None:
+                                        source = cdef.real_color_map[color]
+                                    if (color := color_map.get(target)) is not None:
+                                        target = cdef.real_color_map[color]
+                                    result.append(Instr(op, [source, target]))
+                                case Instr(op, [source]):
+                                    if (color := color_map.get(source)) is not None:
+                                        source = cdef.real_color_map[color]
+                                    result.append(Instr(op, [source]))
+                                case Callq(fun, args):
+                                    if (color := color_map.get(fun)) is not None:
+                                        fun = cdef.real_color_map[color]
+                                    # for i in range(len(args)):
+                                    #     if (color := color_map.get(args[i])) is not None:
+                                    #         args[i] = cdef.real_color_map[color]
+
+                                    result.append(Callq(fun, args))
+                                case IndirectCallq(fun, args):
+                                    if (color := color_map.get(fun)) is not None:
+                                        fun = cdef.real_color_map[color]
+                                    # for i in range(len(args)):
+                                    #     if (color := color_map.get(args[i])) is not None:
+                                    #         args[i] = cdef.real_color_map[color]
+
+                                    result.append(IndirectCallq(fun, args))
+                                case TailJump(fun, args):
+                                    if (color := color_map.get(fun)) is not None:
+                                        fun = cdef.real_color_map[color]
+                                    # for i in range(len(args)):
+                                    #     if (color := color_map.get(args[i])) is not None:
+                                    #         args[i] = cdef.real_color_map[color]
+
+                                    result.append(TailJump(fun, args))
+                                case _:
+                                    result.append(s)
+                        new_blocks[label] = result
+                        cdef.body = new_blocks
+                        cdef.rsp_sub = align(8 * cdef.S + 8 * cdef.C, 16) - 8 * cdef.C
+
+        return p
 
 
 
@@ -1469,7 +1520,29 @@ class Compiler:
             case Instr(instr, [Deref(label_x, x), Deref(label_y, y)]):
                 return [
                     Instr("movq", [Deref(label_x, x), Reg("rax")]),
-                    Instr("movq", [Reg("rax"), Deref(label_y, y)])
+                    Instr(instr, [Reg("rax"), Deref(label_y, y)])
+                ]
+            case TailJump(func, arg):
+                conclusion = []
+                conclusion.extend([
+                    Instr("subq", [Immediate(8 * self.cdef.len_spill_r15), Reg("r15")]),
+                    Instr("addq", [Immediate(self.cdef.rsp_sub), Reg("rsp")]),
+                ])
+                for reg in self.cdef.extra_saved_regs[::-1]:
+                    conclusion.append(Instr("popq", [reg]))
+                conclusion.append(Instr("popq", [Reg('rbp')]))  # seem no need pop
+
+                # func may be need rbp and rbp was pop
+                return [Instr("movq", [func, Reg("rax")])]  + conclusion + [
+                    # Instr('jmp', [Reg("rax")])
+                    TailJump(Reg('rax'), arg)
+                ]
+                # breakpoint()
+            case Instr('leaq', [x, Deref(label_y, y)]):
+                return [
+                    Instr("leaq", [x, Reg("rax")]),
+                    Instr("movq", [Reg("rax"), Deref(label_y, y)]),
+
                 ]
             case Instr(instr, [x86_ast.Global(x), Deref(label_y, y)]):
                 return [
@@ -1502,76 +1575,75 @@ class Compiler:
         return result
 
     def patch_instructions(self, p: X86Program) -> X86Program:
-        new_blocks = {}
+
         match(p):
-            case X86Program(blocks):
-                for label, body in blocks.items():
-                    result = self.patch_instrs(body)
-                    new_blocks[label] = result
+            case X86ProgramDefs(defs):
+                # breakpoint()
+                for cdef in defs:
+
+                    self.cdef = cdef
+                    cdef.len_spill_r15 = len(cdef.r15_spill)
+                    cdef.extra_saved_regs = list(set(cdef.alloc_callee_saved_regs) - {Reg("rbp")})
+
+
+                    for label, stmts in cdef.body.items():
+                        result = self.patch_instrs(stmts)
+                        cdef.body[label] = result
+
+
+                    start = []
+                    start.extend([
+                        Instr("pushq", [Reg("rbp")]),
+                        Instr("movq", [Reg("rsp"), Reg("rbp")]),
+
+                    ])
+                    # save
+                    for reg in cdef.extra_saved_regs:
+                        start.append(Instr("pushq", [reg]))
+                    start.extend([Instr("subq", [Immediate(cdef.rsp_sub), Reg("rsp")])])
+                    if cdef.name == 'main':
+                        start.extend([
+                            Instr("movq", [Immediate(65536), Reg("rdi")]),
+                            Instr("movq", [Immediate(65536), Reg("rsi")]),
+                            Callq(label_name("initialize"), 2),
+                            Instr("movq", [x86_ast.Global("rootstack_begin"), Reg("r15")]),
+                        ])
+
+                    for i in range(cdef.len_spill_r15):
+                        start.append(Instr("movq", [Immediate(0), Deref("r15", 8 * i)]))
+                    start.append(Instr('addq', [Immediate(8 * cdef.len_spill_r15), Reg('r15')]))
+                    start.append(Jump(label_name("{}start".format(cdef.name))))
+
+                    cdef.body[label_name('{}'.format(cdef.name))] = start
+                    # for label , body in blocks.items():
+                    #     pass
+                    conclusion = []
+                    conclusion.extend([
+                        Instr("subq", [Immediate(8 * cdef.len_spill_r15), Reg("r15")]),
+                        Instr("addq", [Immediate(cdef.rsp_sub), Reg("rsp")]),
+                    ])
+                    for reg in cdef.extra_saved_regs[::-1]:
+                        conclusion.append(Instr("popq", [reg]))
+                    conclusion.append(Instr("popq", [Reg('rbp')]))  # seem no need pop
+                    conclusion.append(Instr("retq", []))
+                    # just replace
+                    cdef.body[label_name('{}conclusion'.format(cdef.name))] = conclusion + \
+                        cdef.body[label_name('{}conclusion'.format(cdef.name))]
+                    # for rbp save
+                    # call itelf need be update
+
         # breakpoint()
-        return X86Program(new_blocks)
+        return p
 
     ############################################################################
     # Prelude & Conclusion
     ############################################################################
 
     def prelude_and_conclusion(self, p: X86Program) -> X86Program:
-        # YOUR CODE HERE
-        main = []
-        conclusion = []
-        # The spilled variables must b placed lower on the stackthan the saved callee
-        # because there is rsp betweent it
-        print("alloc_callee_saved_regs ", self.alloc_callee_saved_regs)
-        extra_saved_regs = list(set(self.alloc_callee_saved_regs) - {Reg("rbp")})
-        # breakpoint()
-
+        result = {}
         match (p):
-            case X86Program(blocks):
-                main.extend([
-                    Instr("pushq", [Reg("rbp")]),
-                    Instr("movq", [Reg("rsp"), Reg("rbp")]),
-
-                ])
-                # save
-                for reg in extra_saved_regs:
-                    main.append(Instr("pushq", [reg]))
-                main.extend([ Instr("subq", [Immediate(self.rsp_sub), Reg("rsp")])])
-                main.extend([
-                    Instr("movq", [Immediate(65536), Reg("rdi")]),
-                    Instr("movq", [Immediate(65536), Reg("rsi")]),
-                    Callq(label_name("initialize"), 2),
-                    Instr("movq", [x86_ast.Global("rootstack_begin"), Reg("r15")]),
-                ])
-                len_spill_r15 = len(self.r15_spill)
-                for i in range(len_spill_r15):
-                    main.append( Instr("movq", [Immediate(0), Deref("r15", 8 * i)]))
-                main.append(Instr('addq', [Immediate(8 * len_spill_r15), Reg('r15')]))
-                main.append(Jump(label_name("start")))
-
-                blocks[label_name("main")] = main
-                # for label , body in blocks.items():
-                #     pass
-
-                conclusion.extend([
-                    Instr("subq", [Immediate(8 * len_spill_r15), Reg("r15")]),
-                    Instr("addq", [Immediate(self.rsp_sub), Reg("rsp")]),
-                ])
-                for reg in extra_saved_regs[::-1]:
-                    conclusion.append(Instr("popq", [reg]))
-                conclusion.append(Instr("popq", [Reg('rbp')]))  # seem no need pop
-
-                # just replace
-                blocks[label_name("conclusion")] = conclusion + blocks[label_name("conclusion")]
-
-                # conclusion.extend([
-                #     Instr("popq", [Reg("rbp")]),
-                #     Instr("retq", []),
-                # ])
-                # blocks[label_name("conclusion")] = conclusion
-                #
-                # blocks[self.sort_cfg[-1]][-1] = Jump(label_name("conclusion"))
-
-
-        # breakpoint()
-        return X86Program(blocks)
-
+            case X86ProgramDefs(defs):
+                # breakpoint()
+                for cdef in defs:
+                    result.update(cdef.body)
+        return X86Program(result)

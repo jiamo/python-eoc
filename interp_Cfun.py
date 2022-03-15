@@ -31,6 +31,10 @@ class InterpCfun(InterpCtup):
         f = self.interp_exp(func, env)
         vs = [self.interp_exp(arg, env) for arg in args]
         return self.apply_fun(f, vs, e)
+      case TailCall(func, args):
+        f = self.interp_exp(func, env)
+        vs = [self.interp_exp(arg, env) for arg in args]
+        return self.apply_fun(f, vs, e)
       case FunRef(id, arity):
         return env[id]
       case _:
