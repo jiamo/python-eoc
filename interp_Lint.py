@@ -56,6 +56,7 @@ class InterpLint:
             case Call(Name('input_int'), []):
                 return int(input())
             case _:
+                trace("type {}".format(type(self)))
                 raise Exception('error in interp_exp, unexpected ' + repr(e))
 
     def interp_stmts(self, ss, env):

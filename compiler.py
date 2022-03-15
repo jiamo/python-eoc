@@ -254,6 +254,8 @@ class Compiler:
     # 改函数和参数一起
     def limit_functions_exp(self, e, func_arg_map, args_map):
         match e:
+            case Call(Name('input_int'), []):
+                return e
             case Call(FunRef(name, arth), args):
                 args = [self.limit_functions_exp(i, func_arg_map, args_map)  for i in args]
 
@@ -295,11 +297,14 @@ class Compiler:
             case Subscript(value, slice, ctx):
                 value_expr = self.limit_functions_exp(value, func_arg_map, args_map)
                 slice_expr = self.limit_functions_exp(slice, func_arg_map, args_map)
-                return   Subscript(value_expr, slice_expr, ctx)
-
+                return Subscript(value_expr, slice_expr, ctx)
+            case Tuple(exprs, ctx):
+                # breakpoint()
+                return Tuple([self.limit_functions_exp(i, func_arg_map, args_map) for i in exprs], ctx)
                 # return Subscript(new_value, slice, ctx)
             # case Begin(body, result):
             #     pass
+            # case Call()
             case _:
                 raise Exception('limit: unexpected ' + repr(e))
 
