@@ -7,12 +7,15 @@ import interp_Lif
 import interp_Lwhile
 import interp_Ltup
 import interp_Lfun
+import interp_Llambda
 import type_check_Pvar
 import type_check_Lvar
 import type_check_Lfun
+import type_check_Clambda
 import interp_Cif
 import interp_Ctup
 import interp_Cfun
+import interp_Clambda
 import type_check_Lif
 
 from interp_x86.eval_x86 import interp_x86
@@ -30,12 +33,15 @@ interp_dict = {
     "while": interp_Lwhile.InterpLwhile().interp,
     "tuple": interp_Ltup.InterpLtup().interp,
     "fun": interp_Lfun.InterpLfun().interp,
-    "shrink": interp_Lfun.InterpLfun().interp,
-    "reveal_functions": interp_Lfun.InterpLfun().interp,
-    "limit_functions": interp_Lfun.InterpLfun().interp,
-    "expose_allocation": interp_Lfun.InterpLfun().interp,
-    "remove_complex_operands": interp_Lfun.InterpLfun().interp,
-    "explicate_control": interp_Cfun.InterpCfun().interp,
+    "lambda": interp_Llambda.InterpLlambda().interp,
+    "shrink": interp_Llambda.InterpLlambda().interp,
+    "uniquify": interp_Llambda.InterpLlambda().interp,
+    "reveal_functions": interp_Llambda.InterpLlambda().interp,
+    "convert_assignments": interp_Llambda.InterpLlambda().interp,
+    "limit_functions": interp_Llambda.InterpLlambda().interp,
+    "expose_allocation": interp_Llambda.InterpLlambda().interp,
+    "remove_complex_operands": interp_Llambda.InterpLlambda().interp,
+    "explicate_control": interp_Clambda.InterpClambda().interp,
     "select_instructions": interp_x86,
     "assign_homes": interp_x86,
     "patch_instructions": interp_x86,
@@ -45,8 +51,8 @@ interp_dict = {
 
 if len(sys.argv) == 2:
     one_test_file = sys.argv[1]
-    run_one_test(one_test_file, 'fun',
-                 compiler, 'fun',
+    run_one_test(one_test_file, 'lambda',
+                 compiler, 'lambda',
                  #type_check_Pvar.TypeCheckPvar().type_check_P,
                  type_check_dict,
                  # interp_Pvar.InterpPvar().interp_P,

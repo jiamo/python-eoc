@@ -21,6 +21,7 @@ from interp_x86.eval_x86 import interp_x86
 import type_check_Ctup
 import type_check_Lfun
 import type_check_Cfun
+import type_check_Llambda
 
 
 Binding = Tupling[Name, expr]
@@ -69,6 +70,12 @@ class Compiler:
                 return IfExp(expr[0], expr[1], Constant(False))
             case BoolOp(Or(), expr):
                 return IfExp(expr[0], Constant(True), expr[1])
+            case Lambda(params, body):
+                # breakpoint()
+                # 这里存疑
+                params = [arg.arg for arg in params.args]
+                return Lambda(params, body)
+
             case _:
                 return e
             # case Name(id):
@@ -115,6 +122,7 @@ class Compiler:
             case Assign([lhs], value):
                 s_value = self.shrink_exp(value)
                 result = Assign([lhs], s_value)
+
             case If(test, body, orelse):
                 test_expr = self.shrink_exp(test)
                 body = [self.shrink_stmt(s) for s in body]
@@ -127,6 +135,11 @@ class Compiler:
             case Return(value):
                 s_value = self.shrink_exp(value)
                 result = Return(s_value)
+
+            case AnnAssign(lhs, typ, value, simple):
+                # breakpoint()
+                s_value = self.shrink_exp(value)
+                return AnnAssign(lhs, typ, s_value, simple)
             case _:
                 raise Exception('error in shrink_stmt, unexpected ' + repr(s))
         return result
@@ -173,6 +186,144 @@ class Compiler:
         trace(result)
         return Module(result)
 
+
+    def uniquify_exp(self, e, sym_map):
+        match e:
+            case Call(Name('input_int'), []):
+                return e
+            case Call(Name(fun), args):
+                if fun in sym_map:
+                    fun = sym_map.get(fun)
+                args = [self.uniquify_exp(i, sym_map) for i in args]
+                return Call(Name(fun), args)
+            case Constant(v):
+                return e
+            case Name(id):
+                # print(".... ", sym_map)
+                if id in sym_map:
+                    return Name(sym_map[id])
+                else:
+                    return e
+            case BinOp(left, op, right):
+                l_expr = self.uniquify_exp(left, sym_map)
+                r_expr = self.uniquify_exp(right, sym_map)
+                return_expr = BinOp(l_expr, op, r_expr)
+                return return_expr
+            case UnaryOp(op, v):
+                # one by one
+                v_expr = self.uniquify_exp(v, sym_map)
+                return UnaryOp(op, v_expr)
+            case Compare(left, [cmp], [right]):
+                left_expr = self.uniquify_exp(left, sym_map)
+                right_expr = self.uniquify_exp(right, sym_map)
+                return Compare(left_expr, [cmp], [right_expr])
+
+            case IfExp(expr_test, expr_body, expr_orelse):
+                test_expr = self.uniquify_exp(expr_test, sym_map)
+                body = self.uniquify_exp(expr_body, sym_map)
+                orelse_expr  = self.uniquify_exp(expr_orelse, sym_map)
+                return IfExp(test_expr, body, orelse_expr)
+            case Subscript(value, slice, ctx):
+                value_expr = self.uniquify_exp(value, sym_map)
+                slice_expr = self.uniquify_exp(slice, sym_map)
+                return Subscript(value_expr, slice_expr, ctx)
+            case Tuple(exprs, ctx):
+                # breakpoint()
+                return Tuple([self.uniquify_exp(i, sym_map) for i in exprs], ctx)
+                # return Subscript(new_value, slice, ctx)
+            case Lambda(params, body):
+                # lambda params have not type
+                save_func_map = dict(sym_map)
+                new_params = []
+                for arg in params:
+                    uname = generate_name(arg)
+                    save_func_map[arg] = uname
+                    new_params.append(uname)
+
+                return Lambda(new_params, self.uniquify_exp(body, save_func_map))
+            # case Begin(body, result):
+            #     pass
+            # case Call()
+            case _:
+                raise Exception('limit: unexpected ' + repr(e))
+
+    def uniquify_stmt(self, stmt, sym_map):
+        match stmt:
+            case Expr(Call(Name('print'), [arg])):
+                new_arg = self.uniquify_exp(arg, sym_map)
+                return Expr(Call(Name('print'), [new_arg]))
+            case Expr(value):
+                expr = self.uniquify_exp(value, sym_map)
+                return Expr(expr)
+            case Assign([Name(name)], value):
+                if name in sym_map:
+                    uname = sym_map.get(name)
+                else:
+                    uname = generate_name(name)
+                    sym_map[name] = uname
+
+                v_expr = self.uniquify_exp(value, sym_map)
+                return Assign([Name(uname)], v_expr)
+            case If(test, body, orelse):
+                test_expr = self.uniquify_exp(test, sym_map)
+                body_stmts = []
+                for s in body:
+                    body_stmts.append(self.uniquify_exp(s, sym_map))
+                orelse_stmts = []
+                for s in orelse:
+                    orelse_stmts.append(self.uniquify_exp(s, sym_map))
+                return If(test_expr, body_stmts, orelse_stmts)
+            case While(test, body, []):
+                test_expr = self.uniquify_exp(test, sym_map)
+                body_stmts = []
+                for s in body:
+                    body_stmts.append(self.uniquify_exp(s, sym_map))
+                return While(test_expr, body_stmts, [])
+            case Return(expr):
+                expr = self.uniquify_exp(expr, sym_map)
+                return Return(expr)
+            case AnnAssign(Name(name), typ, value, simple):
+                # breakpoint()
+                if name in sym_map:
+                    uname = sym_map.get(name)
+                else:
+                    uname = generate_name(name)
+                    sym_map[name] = uname
+
+                s_value = self.uniquify_exp(value, sym_map)
+                return AnnAssign(Name(uname), typ, s_value, simple)
+            # case _:
+            #     return stmt
+
+    def uniquify(self, p: Module) -> Module:
+        # YOUR CODE HERE
+        trace(p)
+        result = []
+        match p:
+            case Module(body):
+
+                # breakpoint()
+                for s in body:
+                    match s:
+                        case FunctionDef(x, args, stmts, dl, returns, comment):
+                            # breakpoint()
+                            new_args = []
+                            sym_map = {}  # 是不是每一个函数都需要
+                            for arg in args:
+                                uname = generate_name(arg[0])
+                                # breakpoint()
+                                sym_map[arg[0]] = uname
+                                new_args.append((uname, arg[1]))
+                            new_body = [self.uniquify_stmt(s, sym_map) for s in stmts]
+                            s.args = new_args
+                            s.body = new_body
+                            result.append(s)
+            case _:
+                raise Exception('uniquify: unexpected ' + repr(p))
+        print(result)
+        return Module(result)
+
+
     def reveal_functions_exp(self, exp, func_map):
         match exp:
             case Call(Name(x), args):
@@ -211,9 +362,11 @@ class Compiler:
             case Return(expr):
                 expr = self.reveal_functions_exp(expr, func_map)
                 return Return(expr)
+            case AnnAssign(Name(name), typ, value, simple):
+                value = self.reveal_functions_exp(value, func_map)
+                return AnnAssign(Name(name), typ, value, simple)
             # case _:
             #     return stmt
-
 
 
     def reveal_functions(self, p: Module) -> Module:
@@ -247,6 +400,214 @@ class Compiler:
                                 FunctionDef(x, args, [self.reveal_functions_stmt(s, func_map) for s in stmts], dl, returns, comment))
             case _:
                 raise Exception('reveal_functions: unexpected ' + repr(p))
+        # breakpoint()
+        trace(result)
+        return Module(result)
+
+    def assigned_vars_stmt(self, stmt):
+        match stmt:
+            case Assign([Name(x)], value):
+                # breakpoint()
+                self.name_type_dict[x] = stmt.targets[0].has_type
+                return {x}
+            case _:
+                return set()
+
+    def free_in_exp(self, bindings, e):
+        match e:
+            # case Call(Name('input_int'), []):
+            #     return e
+            # case Call(Name(fun), args):
+            #     if fun in sym_map:
+            #         fun = sym_map.get(fun)
+            #     args = [self.uniquify_exp(i, sym_map) for i in args]
+            #     return Call(Name(fun), args)
+            # case Constant(v):
+            #     return e
+            case Name(id):
+                # print(".... ", sym_map)
+                if id in bindings:
+                    return set()
+                else:
+                    # breakpoint()
+                    self.name_type_dict[id] = e.has_type
+                    return {id}
+            case BinOp(left, op, right):
+                l = self.free_in_exp(bindings, left)
+                r = self.free_in_exp(bindings, right)
+                return l | r
+            case UnaryOp(op, v):
+                # one by one
+                return self.free_in_exp(bindings, v)
+
+            case Compare(left, [cmp], [right]):
+                l = self.free_in_exp(bindings, left)
+                r = self.free_in_exp(bindings, right)
+                return l | r
+
+            case IfExp(expr_test, expr_body, expr_orelse):
+                # 所有的这种表达式可以用 children 来做
+                t = self.free_in_exp(bindings, expr_test)
+                b = self.free_in_exp(bindings, expr_body)
+                e = self.free_in_exp(bindings, expr_orelse)
+                return t | b | e
+            case Subscript(value, slice, ctx):
+                v = self.free_in_exp(bindings, value)
+                s = self.free_in_exp(bindings, slice)
+                return v | s
+            case Tuple(exprs, ctx):
+                # breakpoint()
+                return set().union(*[self.free_in_exp(bindings, i) for i in exprs])
+                # return Subscript(new_value, slice, ctx)
+            case Lambda(params, body):
+                # lambda params have not type
+                return self.free_in_exp(params | bindings, body)
+            case _:
+                return set()
+
+
+    def free_in_lambda_stmt(self, stmt):
+        # lambda can be in any stmt
+        match stmt:
+            # 先假定这个是 只有 lambda
+            case AnnAssign(Name(name), typ, Lambda(params, body), simple):
+                # var not in params are free in bdoy
+                # breakpoint()
+                return self.free_in_exp(params, body)
+            case Assign([Name(x)], value):
+                # breakpoint()
+                self.name_type_dict[x] = stmt.targets[0].has_type
+                return {x}
+            case _:
+                return set()
+
+
+    def convert_assignments_exp(self, e):
+        match e:
+            case Call(Name('input_int'), []):
+                return e
+            case Call(x, args):
+                args = [self.convert_assignments_exp(i) for i in args]
+                return Call(x, args)
+            case Constant(v):
+                return e
+            case Name(id):
+                # print(".... ", sym_map)
+                if id not in self.box_dict:
+                    return e
+                else:
+                    # breakpoint()
+                    return Subscript(Name(self.box_dict[id]), Constant(0), Load())
+            case BinOp(left, op, right):
+                left = self.convert_assignments_exp( left)
+                right = self.convert_assignments_exp( right)
+                return  BinOp(left, op, right)
+            case UnaryOp(op, v):
+                # one by one
+                v =  self.convert_assignments_exp(v)
+                return UnaryOp(op, v)
+
+            case Compare(left, [cmp], [right]):
+                left = self.convert_assignments_exp(left)
+                right = self.convert_assignments_exp(right)
+                return Compare(left, [cmp], [right])
+
+            case IfExp(expr_test, expr_body, expr_orelse):
+                # 所有的这种表达式可以用 children 来做
+                t = self.convert_assignments_exp(expr_test)
+                b = self.convert_assignments_exp(expr_body)
+                e = self.convert_assignments_exp(expr_orelse)
+                return IfExp(t, b, e)
+            case Subscript(value, slice, ctx):
+                v = self.convert_assignments_exp(value)
+                s = self.convert_assignments_exp(slice)
+                return Subscript(v, s, ctx)
+            case Tuple(exprs, ctx):
+                # breakpoint()
+                exprs = [self.convert_assignments_exp(i) for i in exp]
+                return Tuple(exprs, ctx)
+                # return Subscript(new_value, slice, ctx)
+            case Lambda(params, body):
+                # lambda params have not type
+                body = self.convert_assignments_exp(body)
+                return Lambda(params, body)
+
+
+    def convert_assignments_stmt(self, stmt):
+        # lambda can be in any stmt
+        match stmt:
+            case Expr(Call(Name('print'), [arg])):
+                new_arg = self.convert_assignments_exp(arg)
+                return Expr(Call(Name('print'), [new_arg]))
+            case Expr(value):
+                expr = self.convert_assignments_exp(value)
+                return Expr(expr)
+            case Assign([Name(x)], value):
+                v_expr = self.convert_assignments_exp(value)
+                if x in self.box_dict:
+                    return Assign([Subscript(Name(self.box_dict[x]), Constant(0), Store())], v_expr)
+                else:
+                    return Assign(stmt.targets, v_expr)
+            case If(test, body, orelse):
+                test_expr = self.convert_assignments_exp(test)
+                body_stmts = []
+                for s in body:
+                    body_stmts.append(self.convert_assignments_stmt(s))
+                orelse_stmts = []
+                for s in orelse:
+                    orelse_stmts.append(self.convert_assignments_stmt(s))
+                return If(test_expr, body_stmts, orelse_stmts)
+            case While(test, body, []):
+                test_expr = self.convert_assignments_exp(test)
+                body_stmts = []
+                for s in body:
+                    body_stmts.append(self.convert_assignments_stmt(s))
+                return While(test_expr, body_stmts, [])
+            case Return(expr):
+                expr = self.convert_assignments_exp(expr)
+                return Return(expr)
+            case AnnAssign(Name(name), typ, value, simple):
+                value = self.convert_assignments_exp(value)
+                return AnnAssign(Name(name), typ, value, simple)
+
+
+    def convert_assignments(self, p: Module) -> Module:
+        result = []
+        type_check_Llambda.TypeCheckLlambda().type_check(p)
+        self.name_type_dict = {}
+        match p:
+            case Module(body):
+                print(body)
+                # breakpoint()
+                for s in body:
+                    match s:
+                        case FunctionDef(x, args, stmts, dl, returns, comment):
+                            # breakpoint()
+                            params = {x[0] for x in args}
+                            assigned_vars = set()
+                            lambda_free_variables = set()
+                            for s in stmts:
+                                s_assign_vars = self.assigned_vars_stmt(s)
+                                s_lambda_free_vars = self.free_in_lambda_stmt(s)
+                                assigned_vars = assigned_vars.union(s_assign_vars)
+                                lambda_free_variables = lambda_free_variables.union(s_lambda_free_vars)
+
+                            box_names = assigned_vars.intersection(lambda_free_variables)
+                            # breakpoint()
+                            init_box = []
+                            self.box_dict = {}
+                            for name in box_names:
+                                box_name = name[:-2]
+                                if name in params:
+                                    init_box.append(Assign([Name(box_name)], Tuple([Name(name)], Load())))
+                                else:
+                                    # todo we don't infer the type of name
+                                    init_box.append(Assign([Name(box_name)], Tuple([Uninitialized(self.name_type_dict[name])], Load())))
+                                self.box_dict[name] = box_name
+                            stmts = [self.convert_assignments_stmt(i) for i in stmts]
+                            result.append(FunctionDef(x, args, init_box + stmts, dl, returns, comment))
+            case _:
+                raise Exception('convert_assignments: unexpected ' + repr(p))
         # breakpoint()
         trace(result)
         return Module(result)
@@ -302,6 +663,7 @@ class Compiler:
                 # breakpoint()
                 return Tuple([self.limit_functions_exp(i, func_arg_map, args_map) for i in exprs], ctx)
                 # return Subscript(new_value, slice, ctx)
+
             # case Begin(body, result):
             #     pass
             # case Call()

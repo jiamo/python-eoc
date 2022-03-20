@@ -1,5 +1,5 @@
 from ast import *
-from utils import input_int, trace
+from utils import input_int, trace, Uninitialized
 
 
 def interp_exp(e):
@@ -55,6 +55,8 @@ class InterpLint:
                 return value
             case Call(Name('input_int'), []):
                 return int(input())
+            # case Uninitialized(value):
+            #     return None
             case _:
                 trace("type {}".format(type(self)))
                 raise Exception('error in interp_exp, unexpected ' + repr(e))

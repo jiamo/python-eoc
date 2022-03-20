@@ -17,6 +17,8 @@ class InterpLfun(InterpLtup):
   def apply_fun(self, fun, args, e):
       match fun:
         case Function(name, xs, body, env):
+          # breakpoint()
+          trace(f"{fun} {args=} {e} {name} {xs=} {body} {env}")
           new_env = {x: v for (x,v) in env.items()}
           for (x,arg) in zip(xs, args):
               new_env[x] = arg
