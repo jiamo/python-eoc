@@ -6,6 +6,23 @@ from ast import *
 from dataclasses import dataclass
 import typing
 
+
+builtin_functions = {
+     'input_int', 'print',
+     'arity',
+     'len',
+     'array_len', 'array_load', 'array_store',
+     'any_load', 'any_load_unsafe', 'any_store', 'any_store_unsafe',
+     'any_len', 'make_any',
+     'exit',
+     'is_tuple_proxy', 'project_tuple', 'proxy_tuple_load', 'proxy_tuple_len',
+     'is_array_proxy', 'project_array', 'proxy_array_load', 'proxy_array_len',
+     'proxy_array_store',
+     }
+
+tag_is_array_right_shift = 62
+tag_is_proxy_right_shift = 63
+
 ################################################################################
 # repr for classes in the ast module
 ################################################################################
@@ -237,6 +254,17 @@ def repr_Tuple(self):
     return 'Tuple(' + repr(self.elts) + ')'
 Tuple.__repr__ = repr_Tuple
 
+def str_List(self):
+    return '[' + ', '.join([str(e) for e in self.elts]) + ']'
+
+ast.List.__str__ = str_List
+
+def repr_List(self):
+    return 'List(' + repr(self.elts) + ')'
+
+ast.List.__repr__ = repr_List
+
+
 def str_Subscript(self):
     return str(self.value) + '[' + str(self.slice) + ']'
 Subscript.__str__ = str_Subscript
@@ -351,6 +379,18 @@ def make_begin(bs, e):
     else:
         return e
 
+
+@dataclass
+class Cast(expr):
+    body: expr
+    source: Type
+    target: Type
+    __match_args__ = ("body", "source", "target")
+
+    def __str__(self):
+        return '(' + str(self.body) + ' : ' + str(self.source) + ' => ' + str(self.target) + ')'
+
+
 # A lambda expression whose parameters are annotated with types.
 @dataclass
 class AnnLambda(expr):
@@ -407,6 +447,18 @@ class Allocate(expr):
     __match_args__ = ("length", "ty")
     def __str__(self):
         return 'allocate(' + str(self.length) + ',' + str(self.ty) + ')'
+
+
+@dataclass
+class AllocateArray(expr):
+    length: int
+    ty: Type
+    __match_args__ = ("length", "ty")
+
+    def __str__(self):
+        return 'allocate_array(' + str(self.length) + ',' + str(self.ty) + ')'
+
+
 
 @dataclass
 class AllocateClosure(expr):
@@ -470,6 +522,17 @@ class TupleType(Type):
     __match_args__ = ("types",)
     def __str__(self):
         return 'tuple[' + ','.join([str(p) for p in self.types]) + ']'
+
+
+
+@dataclass(eq=True)
+class ListType(Type):
+    elt_type: Type
+    __match_args__ = ("elt_type",)
+
+    def __str__(self):
+        return 'list[' + str(self.elt_type) + ']'
+
 
 @dataclass(eq=True)
 class FunctionType:
@@ -541,9 +604,116 @@ class AnyType(Type):
     def __str__(self):
         return 'any'
 
+
+@dataclass(eq=True)
+class ProxyOrTupleType(Type):
+    elt_types: list[Type]
+
+    def __str__(self):
+        return 'POrTuple[' + ','.join([str(t) for t in self.elt_types]) + ']'
+
+
+@dataclass(eq=True)
+class ProxyOrListType(Type):
+    elt_type: Type
+
+    def __str__(self):
+        return 'POrList[' + str(self.elt_type) + ']'
+
+
+@dataclass(eq=True)
+class TupleProxy(expr):
+    value: expr
+    reads: list[expr]
+    source: Type
+    target: Type
+
+    def __str__(self):
+        return 'tuple_proxy(' + str(self.value) + ', ' + str(self.source) \
+               + ', ' + str(self.target) + ')'
+
+
+@dataclass(eq=True)
+class RawTuple(expr):
+    elts: list[expr]
+
+    def __str__(self):
+        return '[[' + ','.join([str(e) for e in self.elts]) + ']]'
+
+
+@dataclass(eq=True)
+class ListProxy(expr):
+    value: expr
+    read: expr
+    write: expr
+    source: Type
+    target: Type
+
+    def __str__(self):
+        return 'array_proxy(' + str(self.value) + ', ' + str(self.source) \
+               + ', ' + str(self.target) + ')'
+
+
+@dataclass(eq=True)
+class InjectTuple(expr):
+    value: expr
+
+    def __str__(self):
+        return 'inject_tuple[' + str(self.value) + ']'
+
+
+@dataclass(eq=True)
+class InjectTupleProxy(expr):
+    value: expr
+    typ: Type
+
+    def __str__(self):
+        return 'inject_tuple_proxy[' + str(self.value) + ' from ' + str(self.typ) + ']'
+
+
+@dataclass(eq=True)
+class InjectList(expr):
+    value: expr
+
+    def __str__(self):
+        return 'inject_array[' + str(self.value) + ']'
+
+
+@dataclass(eq=True)
+class InjectListProxy(expr):
+    value: expr
+    typ: Type
+
+    def __str__(self):
+        return 'inject_array_proxy[' + str(self.value) + ' from ' + str(self.typ) + ']'
+
+
 # Base class of runtime values
 class Value:
     pass
+
+@dataclass(eq=True)
+class ValueExp(expr):
+    value: Value
+
+# smuggle a runtime value back into the AST
+@dataclass(eq=True)
+class ProxiedTuple(Value):
+    tup: Value
+    reads: list[Value]
+
+    def __str__(self):
+        return 'proxy[' + str(self.value) + ']'
+
+
+@dataclass(eq=True)
+class ProxiedList(Value):
+    tup: Value
+    read: Value
+    write: Value
+
+    def __str__(self):
+        return 'proxy[' + str(self.value) + ']'
     
 ################################################################################
 # Miscellaneous Auxiliary Functions
@@ -642,6 +812,24 @@ def compile_and_test(compiler, compiler_name,
     trace(program)
     trace('')
 
+
+    if 'source' in type_check_dict.keys():
+        trace('\n# type checking source program\n')
+        type_check_dict['source'](program)
+
+    passname = 'resolve'
+    if hasattr(compiler, passname):
+        trace('\n# ' + passname + '\n')
+        program = compiler.resolve(program)
+        trace(program)
+        trace('')
+        if passname in type_check_dict.keys():
+            type_check_dict[passname](program)
+        total_passes += 1
+        successful_passes += \
+            test_pass(passname, interp_dict, program_root, program, compiler_name)
+
+
     passname = 'shrink'
     if hasattr(compiler, passname):
         trace('\n# ' + passname + '\n')
@@ -688,6 +876,31 @@ def compile_and_test(compiler, compiler_name,
         successful_passes += \
             test_pass(passname, interp_dict, program_root, program,
                       compiler_name)
+
+    passname = 'lower_casts'
+    if hasattr(compiler, passname):
+        trace('\n# ' + passname + '\n')
+        program = compiler.lower_casts(program)
+        trace(program)
+        if passname in type_check_dict.keys():
+            type_check_dict[passname](program)
+        total_passes += 1
+        successful_passes += \
+            test_pass(passname, interp_dict, program_root, program,
+                      compiler_name)
+
+    passname = 'differentiate_proxies'
+    if hasattr(compiler, passname):
+        trace('\n# ' + passname + '\n')
+        program = compiler.differentiate_proxies(program)
+        trace(program)
+        if passname in type_check_dict.keys():
+            type_check_dict[passname](program)
+        total_passes += 1
+        successful_passes += \
+            test_pass(passname, interp_dict, program_root, program,
+                      compiler_name)
+
 
     passname = 'cast_insert'
     if hasattr(compiler, passname):
