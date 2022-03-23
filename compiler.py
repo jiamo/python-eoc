@@ -612,6 +612,25 @@ class Compiler:
         trace(result)
         return Module(result)
 
+    def convert_to_closures(self, p):
+        result = []
+        type_check_Llambda.TypeCheckLlambda().type_check(p)
+        self.name_type_dict = {}
+        match p:
+            case Module(body):
+                for s in body:
+                    match s:
+                        case FunctionDef(x, args, stmts, dl, returns, comment):
+                            # breakpoint()
+                            # detect need add a new function?
+                            result.append(FunctionDef(x, args, stmts, dl, returns, comment))
+            case _:
+                raise Exception('convert_assignments: unexpected ' + repr(p))
+        # breakpoint()
+        trace(result)
+        return Module(result)
+
+
     # 改函数和参数一起
     def limit_functions_exp(self, e, func_arg_map, args_map):
         match e:
