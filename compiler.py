@@ -333,9 +333,16 @@ class Compiler:
     def reveal_functions_exp(self, exp, func_map):
         match exp:
             case Call(Name(x), args):
-                if x in func_map:
-                    return Call(func_map[x], args)
-                return exp
+                # no matter it was define or not it should be transform
+                n = len(args)  # TODO may be there is default args
+                return Call(FunRef(x, n), args)
+                # return exp
+            case BinOp(left, op, right):
+                # breakpoint()
+                left = self.reveal_functions_exp(left, func_map)
+                # breakpoint()
+                right = self.reveal_functions_exp(right, func_map)
+                return BinOp(left, op, right)
             case _:
                 return exp
 
@@ -481,6 +488,7 @@ class Compiler:
                 # breakpoint()
                 params_types = typ.param_types
                 for i,j in zip(params, params_types):
+                    # breakpoint()
                     self.name_type_dict[i] = j  # name have be unify
                 return self.free_in_exp(params, body)
             case Assign([Name(x)], value):
@@ -627,9 +635,16 @@ class Compiler:
         match e:
             case Call(Name('input_int'), []):
                 return e
-            case Call(x, args):
+            case Call(FunRef(name, n), args):
+                # breakpoint()
                 args = [self.convert_to_closures_exp(i) for i in args]
-                return Call(x, args)
+                # return Call(x, args)
+                c =  Closure(n, [FunRef(name, n)])
+                tmp = generate_name("clos")
+                return Begin(
+                    [Assign([Name(tmp)], c)],
+                    Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
+                )
             case Constant(v):
                 return e
             case Name(id):
@@ -640,7 +655,9 @@ class Compiler:
                     # breakpoint()
                     return Subscript(Name(self.box_dict[id]), Constant(0), Load())
             case BinOp(left, op, right):
+                # breakpoint()
                 left = self.convert_to_closures_exp( left)
+                # breakpoint()
                 right = self.convert_to_closures_exp( right)
                 return  BinOp(left, op, right)
             case UnaryOp(op, v):
@@ -669,11 +686,11 @@ class Compiler:
                 return Tuple(exprs, ctx)
                 # return Subscript(new_value, slice, ctx)
             case Lambda(params, body):
-                breakpoint()
+                # breakpoint()
                 # lambda params have not type
                 # body = self.convert_to_closures_exp(body)
                 # fvs.2:(bot,(int),(int)),z:int
-                name = label_name('lambda')
+                name = generate_name('lambda')
                 n = len(params)
                 free_vars = list(self.free_in_exp(params, body))
                 # free_vars return the name.....
@@ -683,15 +700,18 @@ class Compiler:
                 lambda_parms = []
                 stmts = []
                 closTy = TupleType([Bottom(), *[self.name_type_dict[i] for i in free_vars]])
-                lambda_parms.append(('clos', closTy))
+                fsv_name = generate_name('fvs')
+                lambda_parms.append((fsv_name, closTy))
                 for i in params:
+                    # breakpoint()
                     lambda_parms.append((i, self.name_type_dict[i]))
                 
                 for i, v in enumerate(free_named_vars):
-                    stmts.append(Assign([v], Subscript(Name('clos'), Constant(i), Load())))
-                returns = self.tmp_ann_typ.ret_typ
+                    stmts.append(Assign([v], Subscript(Name(fsv_name), Constant(i+1), Load())))
+                # breakpoint()
+                returns = self.tmp_ann_typ.ret_type
                 # May be the return was function type again and need to convertion to closure type TODO
-                lambda_def = FunctionDef(name, lambda_parms, stmts + [body], None, returns, None)
+                lambda_def = FunctionDef(name, lambda_parms, stmts + [Return(body)], None, returns, None)
                 self.lambda_convert_defs.append(lambda_def)
 
                 return Closure(n, [FunRef(name, n), *free_named_vars])  # save the free_named_vars into the cloure
@@ -705,7 +725,8 @@ class Compiler:
             case Expr(value):
                 expr = self.convert_to_closures_exp(value)
                 return Expr(expr)
-            case Assign([Name(x)], value):
+            case Assign([l], value):
+                l = self.convert_to_closures_exp(l)
                 v_expr = self.convert_to_closures_exp(value)
 
                 return Assign(stmt.targets, v_expr)
@@ -731,25 +752,29 @@ class Compiler:
                 # breakpoint()
                 self.tmp_ann_typ = typ
                 value = self.convert_to_closures_exp(value)
-                return Assign(Name(name), typ, value, simple)
+                return Assign([Name(name)], value)
 
     def convert_to_closures(self, p):
         result = []
         type_check_Llambda.TypeCheckLlambda().type_check(p)
-        self.name_type_dict = {}
+        # self.name_type_dict = {}
         self.lambda_convert_defs = []
         match p:
             case Module(body):
                 for s in body:
                     match s:
                         case FunctionDef(x, args, stmts, dl, returns, comment):
-                            breakpoint()
+                            # breakpoint()
                             # detect need add a new function?
                             stmts = [self.convert_to_closures_stmt(i) for i in stmts]
+                            if x != "main":
+                                tmp = generate_name('fvs')
+                                args =  [(tmp, Bottom())] + args
                             result.append(FunctionDef(x, args, stmts, dl, returns, comment))
             case _:
                 raise Exception('convert_assignments: unexpected ' + repr(p))
         # breakpoint()
+        result = self.lambda_convert_defs + result
         trace(result)
         return Module(result)
 
@@ -1242,7 +1267,7 @@ class Compiler:
                 goto_thn = create_block(thn, basic_blocks)
                 goto_els = create_block(els, basic_blocks)
                 # breakpoint()
-                print("xxxxxxxxxx")
+                # print("xxxxxxxxxx")
                 return [If(cnd, [goto_thn], [goto_els])]
             case Constant(True):
                 return thn
