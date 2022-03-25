@@ -278,7 +278,7 @@ def str_FunctionDef(self):
     if isinstance(self.args, ast.arguments):
         params = ', '.join([a.arg + ':' + str(a.annotation) for a in self.args.args])
     else:
-        # breakpoint()
+        # trace(self.args)
         params = ', '.join([x + ':' + str(t) for (x,t) in self.args])
     indent()
     if isinstance(self.body, list):

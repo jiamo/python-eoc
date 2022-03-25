@@ -541,7 +541,7 @@ class Compiler:
                 return Subscript(v, s, ctx)
             case Tuple(exprs, ctx):
                 # breakpoint()
-                exprs = [self.convert_assignments_exp(i) for i in exp]
+                exprs = [self.convert_assignments_exp(i) for i in exprs]
                 return Tuple(exprs, ctx)
                 # return Subscript(new_value, slice, ctx)
             case Lambda(params, body):
@@ -592,6 +592,7 @@ class Compiler:
         result = []
         type_check_Llambda.TypeCheckLlambda().type_check(p)
         self.name_type_dict = {}
+        self.top_funs = set()
         match p:
             case Module(body):
                 print(body)
@@ -600,7 +601,8 @@ class Compiler:
                     match s:
                         case FunctionDef(x, args, stmts, dl, returns, comment):
                             # breakpoint()
-                            params = {x[0] for x in args}
+                            self.top_funs.add(x)
+                            params = {i[0] for i in args}
                             assigned_vars = set()
                             lambda_free_variables = set()
                             for s in stmts:
@@ -639,7 +641,10 @@ class Compiler:
                 # breakpoint()
                 args = [self.convert_to_closures_exp(i) for i in args]
                 # return Call(x, args)
-                c =  Closure(n, [FunRef(name, n)])
+                if name in self.top_funs:
+                    c = Closure(n, [FunRef(name, n)])
+                else:
+                    c = FunRef(name, n)
                 tmp = generate_name("clos")
                 return Begin(
                     [Assign([Name(tmp)], c)],
@@ -662,7 +667,7 @@ class Compiler:
                 return  BinOp(left, op, right)
             case UnaryOp(op, v):
                 # one by one
-                v =  self.convert_to_closures_exp(v)
+                v = self.convert_to_closures_exp(v)
                 return UnaryOp(op, v)
 
             case Compare(left, [cmp], [right]):
@@ -692,11 +697,12 @@ class Compiler:
                 # fvs.2:(bot,(int),(int)),z:int
                 name = generate_name('lambda')
                 n = len(params)
+
                 free_vars = list(self.free_in_exp(params, body))
                 # free_vars return the name.....
                 free_named_vars = [Name(i) for i in free_vars]
-
-
+                free_types = [self.name_type_dict[i] for i in free_vars]
+                # breakpoint()
                 lambda_parms = []
                 stmts = []
                 closTy = TupleType([Bottom(), *[self.name_type_dict[i] for i in free_vars]])
@@ -705,17 +711,26 @@ class Compiler:
                 for i in params:
                     # breakpoint()
                     lambda_parms.append((i, self.name_type_dict[i]))
-                
+
                 for i, v in enumerate(free_named_vars):
                     stmts.append(Assign([v], Subscript(Name(fsv_name), Constant(i+1), Load())))
+
                 # breakpoint()
                 returns = self.tmp_ann_typ.ret_type
                 # May be the return was function type again and need to convertion to closure type TODO
                 lambda_def = FunctionDef(name, lambda_parms, stmts + [Return(body)], None, returns, None)
                 self.lambda_convert_defs.append(lambda_def)
 
-                return Closure(n, [FunRef(name, n), *free_named_vars])  # save the free_named_vars into the cloure
+                # The return type was
+                closureTy = TupleType([FunctionType([i[1] for i in lambda_parms], returns), *free_types])
+                c = Closure(n, [FunRef(name, n), *free_named_vars])  # save the free_named_vars into the cloure
+                c.closure_type = closureTy
+                return c
 
+            case Uninitialized(ty):
+                return e
+            case _:
+                raise Exception('convert_to_closures_exp: unexpected ' + repr(e))
 
     def convert_to_closures_stmt(self, stmt):
         match stmt:
@@ -752,13 +767,23 @@ class Compiler:
                 # breakpoint()
                 self.tmp_ann_typ = typ
                 value = self.convert_to_closures_exp(value)
+                self.lambda_exp[Name(name)]  = value
                 return Assign([Name(name)], value)
+    #
+    # def convert_return_to_closure_type(self, r):
+    #     match r:
+    #         case FunctionType(argtypes, returns):
+    #             # 我需要知道它返回一个closure 里面的 自由变量的type
+    #             return TupleType
+    #         case _:
+    #             return r
 
     def convert_to_closures(self, p):
         result = []
         type_check_Llambda.TypeCheckLlambda().type_check(p)
         # self.name_type_dict = {}
         self.lambda_convert_defs = []
+        self.lambda_exp = {}
         match p:
             case Module(body):
                 for s in body:
@@ -769,11 +794,17 @@ class Compiler:
                             stmts = [self.convert_to_closures_stmt(i) for i in stmts]
                             if x != "main":
                                 tmp = generate_name('fvs')
-                                args =  [(tmp, Bottom())] + args
+                                args = [(tmp, Bottom())] + args
+                            # breakpoint()
+                            if stmts[-1].value in self.lambda_exp:
+                                # pass
+                                returns = self.lambda_exp[stmts[-1].value].closure_type
+
                             result.append(FunctionDef(x, args, stmts, dl, returns, comment))
             case _:
                 raise Exception('convert_assignments: unexpected ' + repr(p))
         # breakpoint()
+        type_check_Llambda.TypeCheckLlambda().type_check(p)
         result = self.lambda_convert_defs + result
         trace(result)
         return Module(result)
@@ -781,11 +812,12 @@ class Compiler:
 
     # 改函数和参数一起
     def limit_functions_exp(self, e, func_arg_map, args_map):
+        # TODO lambda 也有 超过 7 个参数的怎么办
         match e:
             case Call(Name('input_int'), []):
                 return e
             case Call(FunRef(name, arth), args):
-                args = [self.limit_functions_exp(i, func_arg_map, args_map)  for i in args]
+                args = [self.limit_functions_exp(i, func_arg_map, args_map) for i in args]
 
                 if name in func_arg_map:
                     first = [args[i] for i in range(5)]
@@ -830,10 +862,22 @@ class Compiler:
                 # breakpoint()
                 return Tuple([self.limit_functions_exp(i, func_arg_map, args_map) for i in exprs], ctx)
                 # return Subscript(new_value, slice, ctx)
-
-            # case Begin(body, result):
-            #     pass
-            # case Call()
+            case Uninitialized(ty):
+                return e
+            case Call(Subscript(Name(f), Constant(0), Load()), args) if len(args) > 6:
+                first = [args[i] for i in range(5)]
+                after = Tuple([args[i] for i in range(5, len(args))], Load())
+                return Call(Subscript(Name(f), Constant(0), Load()), first + [after])
+            case Call(Subscript(Name(f), Constant(0), Load()), args):
+                return e
+            case Closure(arith, args):
+                return e
+            case FunRef(name, arith):
+                return FunRef(name, 6 if arith > 6 else arith)
+            case Begin(stmts, result):
+                stmts = [self.limit_functions_stmt(i, func_arg_map, args_map) for i in stmts]
+                result = self.limit_functions_exp(result, func_arg_map, args_map)
+                return Begin(stmts, result)
             case _:
                 raise Exception('limit: unexpected ' + repr(e))
 
@@ -880,7 +924,10 @@ class Compiler:
                     match s:
                         case FunctionDef(x, args, stmts, dl, returns, comment):
                             # breakpoint()
+                            # lambda 已经转化成 FunctionDef 了
                             new_args = []
+
+                            # change returns
                             if len(args) > 6:
 
                                 pass
@@ -895,6 +942,9 @@ class Compiler:
                                     new_args_map[args[i][0]] = Subscript(Name('tup'), Constant(i - 5), Load())
                                 new_args.append(("tup", TupleType(tuple_args)))
                                 func_args_map[x] = new_args_map
+
+                                # return 的参数如果也是大于 6 的那么这个 return 液压好改啊
+
                                 result.append(FunctionDef(x, new_args, stmts, dl, returns, comment))
                             else:
                                 result.append(s)
@@ -908,9 +958,24 @@ class Compiler:
                 case FunctionDef(fun, args, stmts, dl, returns, comment):
                     # breakpoint()
                     if fun in func_args_map:
+                        # 到这个函数之后才用这个 args map
                         args_map = func_args_map[fun]
                     else:
                         args_map = {}
+
+                    # 在这里改 return 更加合适
+                    if stmts[-1].value in self.lambda_exp:
+                        # reducet type
+                        lambda_name = self.lambda_exp[stmts[-1].value].args[0].name
+                        if lambda_name in func_args_map:
+                            match returns:
+                                # 用同样的 args 居然 覆盖了上面的
+                                # 该用 targs
+                                case TupleType([FunctionType(targs, y), *z]):
+                                    first = [targs[i] for i in range(5)]
+                                    after = [TupleType([targs[i] for i in range(5, len(targs))])]
+                                    returns = TupleType([FunctionType(first + after, y), *z])
+                        # breakpoint()
                     new_result.append(
                         FunctionDef(fun, args, [self.limit_functions_stmt(s, func_args_map, args_map) for s in stmts],
                                     dl, returns, comment))
@@ -1005,8 +1070,8 @@ class Compiler:
 
     def expose_allocation(self, p):
         # YOUR CODE HERE
-        # trace(p)
-        type_check_Lfun.TypeCheckLfun().type_check(p)
+        trace(p)
+        type_check_Llambda.TypeCheckLlambda().type_check(p)
         result = []
         match p:
             case Module(body):

@@ -38,6 +38,7 @@ interp_dict = {
     "uniquify": interp_Llambda.InterpLlambda().interp,
     "reveal_functions": interp_Llambda.InterpLlambda().interp,
     "convert_assignments": interp_Llambda.InterpLlambda().interp,
+    "convert_to_closures": interp_Llambda.InterpLlambda().interp,
     "limit_functions": interp_Llambda.InterpLlambda().interp,
     "expose_allocation": interp_Llambda.InterpLlambda().interp,
     "remove_complex_operands": interp_Llambda.InterpLlambda().interp,

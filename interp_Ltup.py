@@ -15,7 +15,7 @@ class InterpLtup(InterpLwhile):
     match e:
       case Tuple(es, Load()):
         # use a list for mutability
-        trace("$$$$$$$$$$")
+        # trace("$$$$$$$$$$")
         return [self.interp_exp(e, env) for e in es]
       case Subscript(tup, index, Load()):
         t = self.interp_exp(tup, env)
