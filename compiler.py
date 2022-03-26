@@ -74,44 +74,11 @@ class Compiler:
             case BoolOp(Or(), expr):
                 return IfExp(expr[0], Constant(True), expr[1])
             case Lambda(params, body):
-                # breakpoint()
-                # 这里存疑
                 params = [arg.arg for arg in params.args]
                 return Lambda(params, body)
 
             case _:
                 return e
-            # case Name(id):
-            #     return e, []
-            # case BinOp(left, op, right):
-            #     print(left, op, right)
-            #     l_expr, l_tmps = self.rco_exp(left, True)
-            #     r_expr, r_tmps = self.rco_exp(right, True)
-            #     l_tmps.extend(r_tmps)
-            #     return_expr = BinOp(l_expr, op, r_expr)
-            #     if need_atomic:
-            #         tmp = Name(generate_name("tmp"))
-            #         l_tmps.append((tmp, return_expr))
-            #         return tmp, l_tmps
-            #     else:
-            #         return return_expr, l_tmps
-            # case UnaryOp(USub(), v):
-            #     # one by one
-            #     v_expr, v_tmps = self.rco_exp(v, True)
-            #     print(v_expr, v_tmps)
-            #     return_expr = UnaryOp(USub(), v_expr)
-            #     if need_atomic:
-            #         tmp = Name(generate_name("tmp"))
-            #         v_tmps.append((tmp, return_expr))
-            #         return tmp, v_tmps
-            #     else:
-            #         return return_expr, v_tmps
-            # case Constant(value):
-            #     return e, []
-            # case Call(Name('input_int'), []):
-            #     return e, []  # beachse match e was
-            # case _:
-            #     raise Exception('error in rco_exp, unexpected ' + repr(e))
 
     def shrink_stmt(self, s: stmt) -> stmt:
         # YOUR CODE HERE
@@ -277,16 +244,16 @@ class Compiler:
                 test_expr = self.uniquify_exp(test, sym_map)
                 body_stmts = []
                 for s in body:
-                    body_stmts.append(self.uniquify_exp(s, sym_map))
+                    body_stmts.append(self.uniquify_stmt(s, sym_map))
                 orelse_stmts = []
                 for s in orelse:
-                    orelse_stmts.append(self.uniquify_exp(s, sym_map))
+                    orelse_stmts.append(self.uniquify_stmt(s, sym_map))
                 return If(test_expr, body_stmts, orelse_stmts)
             case While(test, body, []):
                 test_expr = self.uniquify_exp(test, sym_map)
                 body_stmts = []
                 for s in body:
-                    body_stmts.append(self.uniquify_exp(s, sym_map))
+                    body_stmts.append(self.uniquify_stmt(s, sym_map))
                 return While(test_expr, body_stmts, [])
             case Return(expr):
                 expr = self.uniquify_exp(expr, sym_map)
@@ -335,7 +302,7 @@ class Compiler:
 
     def reveal_functions_exp(self, exp, func_map):
         match exp:
-            case Call(Name(x), args):
+            case Call(Name(x), args) if x not in builtin_functions :
                 # no matter it was define or not it should be transform
                 n = len(args)  # TODO may be there is default args
                 return Call(FunRef(x, n), args)
@@ -351,6 +318,10 @@ class Compiler:
 
     def reveal_functions_stmt(self, stmt, func_map):
         match stmt:
+            case Expr(Call(Name('input'), [])):
+                # new_arg = self.reveal_functions_exp(arg, func_map)
+                # breakpoint()
+                return Expr(Call(Name('input'), []))   # may be build in function
             case Expr(Call(Name('print'), [arg])):
                 new_arg = self.reveal_functions_exp(arg, func_map)
                 return Expr(Call(Name('print'), [new_arg]))
@@ -792,6 +763,16 @@ class Compiler:
     #         case _:
     #             return r
 
+    def find_last_stmt_return(self, stmt):
+        # if it was return
+        match stmt:
+            case Return(exp):
+                return exp
+            case If(test, body, orelse):
+                # breakpoint()
+                return self.find_last_stmt_return(body[-1])
+
+
     def convert_to_closures(self, p):
         result = []
         type_check_Llambda.TypeCheckLlambda().type_check(p)
@@ -810,7 +791,9 @@ class Compiler:
                                 tmp = generate_name('fvs')
                                 args = [(tmp, Bottom())] + args
                             # breakpoint()
-                            if stmts[-1].value in self.lambda_exp:
+                            return_value = self.find_last_stmt_return(stmts[-1])
+
+                            if isinstance(return_value, Name) and return_value in self.lambda_exp:
                                 # pass
                                 returns = self.lambda_exp[stmts[-1].value].closure_type
 
@@ -978,7 +961,8 @@ class Compiler:
                         args_map = {}
 
                     # 在这里改 return 更加合适
-                    if stmts[-1].value in self.lambda_exp:
+                    return_value = self.find_last_stmt_return(stmts[-1])
+                    if isinstance(return_value, Name) and return_value in self.lambda_exp:
                         # reducet type
                         lambda_name = self.lambda_exp[stmts[-1].value].args[0].name
                         if lambda_name in func_args_map:
@@ -1093,6 +1077,29 @@ class Compiler:
                 # we can't make exp 's stmt before begin's own stmt
 
                 return Begin(new_body, exp), []
+            case Compare(x, [op], yl):
+                nx, stmts = self.expose_allocation_exp(x)
+                n_yl = []
+                for y in yl:
+                    ny, ny_stmts = self.expose_allocation_exp(y)
+                    n_yl.append(ny)
+                    stmts.extend(ny_stmts)
+                return Compare(nx, [op], n_yl), stmts
+            case UnaryOp(op, expr):
+                expr, stmts = self.expose_allocation_exp(expr)
+                return UnaryOp(op, expr), stmts
+            case IfExp(test, body, else_):
+                test, test_stmts = self.expose_allocation_exp(test)
+                body, body_stmts = self.expose_allocation_exp(body)
+                if body_stmts:
+                    body = Begin(body_stmts, body)
+                else_, else_stmts = self.expose_allocation_exp(else_)
+                if else_stmts:
+                    else_ = Begin(else_stmts, else_)
+                    # 没有 stmt 没有必要用 begin 包装
+
+                # test_stmts 是可以在前面返回的
+                return IfExp(test, body, else_), test_stmts
             case _:
                 raise Exception('expose_allocation_exp: unexpected ' + repr(exp))
 
@@ -1222,9 +1229,9 @@ class Compiler:
                     return return_expr, left_tmps
 
             case IfExp(expr_test, expr_body, expr_orelse):
-                test_expr, test_tmps = self.rco_exp(expr_test, False)
-                body, body_tmps = self.rco_exp(expr_body, False)
-                orelse_expr, orelse_tmp = self.rco_exp(expr_orelse, False)
+                test_expr, test_tmps = self.rco_exp(expr_test, True)
+                body, body_tmps = self.rco_exp(expr_body, True)
+                orelse_expr, orelse_tmp = self.rco_exp(expr_orelse, True)
 
                 wrap_body = Begin([ Assign([name], expr)for name,expr in body_tmps], body)
                 wrap_orelse = Begin([Assign([name], expr) for name, expr in orelse_tmp], orelse_expr)
@@ -1380,17 +1387,12 @@ class Compiler:
                 return self.explicate_pred(test, body_list, orelse_list, basic_blocks)
 
             case Begin(body, result):
-                print("yyyy")
                 new_body = [Assign([lhs], result)] + cont
                 for s in reversed(body):
                     # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
             case _:
-                # if str(lhs.id) == 'tmp.0':
-                #     print("xxxx")
-                # breakpoint()
-                # 这里
                 return [Assign([lhs], rhs)] + cont
 
 
