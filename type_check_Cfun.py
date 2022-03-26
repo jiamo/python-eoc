@@ -2,6 +2,9 @@ from ast import *
 from utils import *
 from type_check_Ctup import TypeCheckCtup
 import copy
+from graph import UndirectedAdjList, transpose, topological_sort
+from x86_ast import Jump, JumpIf
+
 
 class TypeCheckCfun(TypeCheckCtup):
 
@@ -64,9 +67,22 @@ class TypeCheckCfun(TypeCheckCtup):
         new_env = {x: t for (x,t) in env.items()}
         for (x,t) in params:
             new_env[x] = t
+        cfg = UndirectedAdjList()
+        for label, body in blocks.items():
+            for i in body:
+                if isinstance(i, Jump) or isinstance(i, JumpIf):
+                    # breakpoint()
+                    cfg.add_edge(label, i.label)
+
+
+        sort_cfg = topological_sort(cfg)
+
         while True:
             old_env = copy.deepcopy(new_env)
-            for (l,ss) in blocks.items():
+            for l in reversed(sort_cfg):
+                ss = blocks[l]
+                # should handing by top_logic.......
+                trace("handing....... {}".format(l))
                 self.type_check_stmts(ss, new_env)
             # trace('type_check_Cfun iterating ' + repr(new_env))
             if new_env == old_env:

@@ -420,9 +420,9 @@ class X86Emulator:
                 self.store_arg(a2, v1)
 
             elif instr.data == 'indirect_callq':
-                # trace("&&&& {} {}".format(instr, instr.children[0]))
+                trace("&&&& {} {}".format(instr, instr.children[0]))
                 v = self.eval_arg(instr.children[0])
-                # trace('{} {}'.format(blocks.keys(), v))
+                trace('{} {}'.format(blocks.keys(), v))
 
                 assert isinstance(v, FunPointer)
                 target = v.fun_name

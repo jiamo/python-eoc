@@ -22,6 +22,7 @@ import type_check_Ctup
 import type_check_Lfun
 import type_check_Cfun
 import type_check_Llambda
+import type_check_Clambda
 
 
 Binding = Tupling[Name, expr]
@@ -41,7 +42,7 @@ op_dict = {
 }
 
 
-def calculate_tag(size, ty):
+def calculate_tag(size, ty, arith=None):
     tag = bitarray.bitarray(64, endian="little")
     tag.setall(0)
     p_mask = 7
@@ -53,6 +54,8 @@ def calculate_tag(size, ty):
         else:
             tag[p_mask + i] = 0
     tag[1:7] = tag[1:7] | bitarray.util.int2ba(size, length=6, endian='little')
+    if arith:
+        tag[58:63] = bitarray.util.int2ba(arith, length=5, endian='little')
     print("tags", bitarray.util.ba2base(2, tag))
     return bitarray.util.ba2int(tag)
 
@@ -643,13 +646,24 @@ class Compiler:
                 # return Call(x, args)
                 if name in self.top_funs:
                     c = Closure(n, [FunRef(name, n)])
+                    tmp = generate_name("clos")
+                    return Begin(
+                        [Assign([Name(tmp)], c)],
+                        Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
+                    )
                 else:
-                    c = FunRef(name, n)
-                tmp = generate_name("clos")
-                return Begin(
-                    [Assign([Name(tmp)], c)],
-                    Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
-                )
+                    # 这里为什么不能用 FunRef 因为这里不在是 FunRef 了
+                    # 最终的 FunRef 在 closure 的第一个元素力
+                    # c = FunRef(name, n) 这个错误居然到等到 select_stmt 才能发现
+                    c = Name(name)
+                    # 默认 这个 name 已经返回成 closure
+                    tmp = generate_name("clos")
+                    return Begin(
+                        [Assign([Name(tmp)], c)],
+                        Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
+                    )
+
+
             case Constant(v):
                 return e
             case Name(id):
@@ -870,8 +884,8 @@ class Compiler:
                 return Call(Subscript(Name(f), Constant(0), Load()), first + [after])
             case Call(Subscript(Name(f), Constant(0), Load()), args):
                 return e
-            case Closure(arith, args):
-                return e
+            case Closure(arith, [FunRef(name, arity), *z]):
+                return Closure(6 if arith > 6 else arith, [FunRef(name, 6 if arith > 6 else arity), *z])
             case FunRef(name, arith):
                 return FunRef(name, 6 if arith > 6 else arith)
             case Begin(stmts, result):
@@ -990,7 +1004,6 @@ class Compiler:
     def expose_allocation_exp(self, exp) -> Tupling[expr, List[stmt]]:
         match exp:
             case Call(x, args):
-
                 stmts = []
                 new_args = []
                 for arg in args:
@@ -1027,10 +1040,61 @@ class Compiler:
                 var = Name(tmp)
                 stmts.append(Assign([var], Allocate(n, exp.has_type))) # may exp.has_type.types
                 for i in range(len(exprs)):
-                    stmts.append(Assign([Subscript(var, Constant(i), Load())], tmp_exprs[i])) # todo the Load is what
+                    stmts.append(Assign([Subscript(var, Constant(i), Store())], tmp_exprs[i])) # todo the Load is what
                 return var, stmts
-            case _:
+            case Closure(arity, exprs):
+
+                # may be we can using begin
+                stmts = []
+
+                # do expr
+                tmp_exprs = []
+                for expr in exprs:
+                    tmp = generate_name("tmp")
+                    var = Name(tmp)
+                    new_expr, tmp_stmts = self.expose_allocation_exp(expr)
+                    stmts.extend(tmp_stmts)
+                    new_stmt = Assign([var], new_expr)
+                    stmts.append(new_stmt)
+                    tmp_exprs.append(var)
+                # breakpoint()
+                n = len(exprs)
+                stmts.append(
+                    If(Compare(BinOp(GlobalValue("free_ptr"), Add(), Constant(8 * (n+1))), [Lt()], [GlobalValue("fromspace_end")]),
+                       [Expr(Constant(0))],
+                       [Collect(8 * (n+1))])
+                )
+                tmp = generate_name("alloc")
+                var = Name(tmp)
+                stmts.append(Assign([var], AllocateClosure(n, exp.has_type, arity))) # may exp.has_type.types
+                for i in range(len(exprs)):
+                    stmts.append(Assign([Subscript(var, Constant(i), Store())], tmp_exprs[i])) # todo the Load is what
+                return var, stmts
+
+            case BinOp(left, op, right):
+                left, left_stmts = self.expose_allocation_exp(left)
+                right, right_stmts = self.expose_allocation_exp(right)
+                return BinOp(left, op, right), left_stmts + right_stmts
+
+            case Uninitialized(t):
                 return exp, []
+            case Name(x):
+                return exp, []
+            case Constant(x):
+                return exp, []
+            case FunRef(x, n):
+                return exp, []
+            case Begin(body, exp):
+                new_body = []
+                for i in body:
+                    new_body.extend(self.expose_allocation_stmt(i))
+                exp, stmts = self.expose_allocation_exp(exp)
+                new_body.extend(stmts)
+                # we can't make exp 's stmt before begin's own stmt
+
+                return Begin(new_body, exp), []
+            case _:
+                raise Exception('expose_allocation_exp: unexpected ' + repr(exp))
 
 
     def expose_allocation_stmt(self, s: stmt) -> List[stmt]:
@@ -1134,6 +1198,13 @@ class Compiler:
                     return tmp, [(tmp, e)]
                 else:
                     return e, []
+            case AllocateClosure(length, ty, airth):
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    # v_tmps.append()
+                    return tmp, [(tmp, e)]
+                else:
+                    return e, []
             case Constant(value):
                 return e, []
             case Call(Name('input_int'), []):
@@ -1176,27 +1247,44 @@ class Compiler:
                 else:
                     return return_expr, value_tmps
                 # return Subscript(new_value, slice, ctx)
-            case Call(FunRef(n, art), args):
+            case FunRef(n, art):
+                fun_tmp = Name(generate_name("fun"))
+                new_tmps = []
+                new_tmps.append((fun_tmp, FunRef(n, art)))
+                return fun_tmp, new_tmps
+            case Call(fr, args):
                 # 	fun.0 = add(%rip)
                 # 	tmp.1 = fun.0(40, 2)
                 new_args = []
-                new_tmps = []
-                fun_tmp = Name(generate_name("fun"))
-                new_tmps.append((fun_tmp, FunRef(n, art)))
+                fun_tmp, new_tmps = self.rco_exp(fr, True)
                 for arg in args:
                     arg_expr, arg_tmps = self.rco_exp(arg, True)
                     new_args.append(arg_expr)
                     new_tmps.extend(arg_tmps)
                 return_expr = Call(fun_tmp, new_args)
                 if need_atomic and (not self.optimse_tail):
-                # if need_atomic:
                     tmp = Name(generate_name("tmp"))
                     new_tmps.append((tmp, return_expr))
                     return tmp, new_tmps
                 else:
                     return return_expr, new_tmps
-            # case Begin(body, result):
-            #     pass
+            case Begin(body, result):
+                # first body then result
+                new_body = []
+                for i in body:
+                    new_body.extend(self.rco_stmt(i))
+                new_result, tmps = self.rco_exp(result, True)  # does begin it self need atom
+                for name, i in tmps:
+                    new_body.append(Assign([name], i))
+                return_exp = Begin(new_body, new_result)
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    # the begin itself is not
+                    return tmp, [(tmp, return_exp)]
+                else:
+                    return return_exp, []
+            case Uninitialized(t):
+                return e, []
             case _:
                 raise Exception('error in rco_exp, unexpected ' + repr(e))
     
@@ -1259,6 +1347,7 @@ class Compiler:
     def remove_complex_operands(self, p: Module) -> Module:
         # YOUR CODE HERE
         trace(p)
+        type_check_Llambda.TypeCheckLlambda().type_check(p)
         result = []
         match p:
             case Module(body):
@@ -1276,6 +1365,7 @@ class Compiler:
                 raise Exception('interp: unexpected ' + repr(p))
 
         # breakpoint()
+        type_check_Llambda.TypeCheckLlambda().type_check(p)
         trace(result)
         return result
 
@@ -1427,6 +1517,7 @@ class Compiler:
 
     def explicate_control(self, p):
         result = []
+
         match p:
             case Module(body):
                 for s in body:
@@ -1475,6 +1566,8 @@ class Compiler:
                 return Immediate(0)
             case Constant(value):
                 return Immediate(value)
+            case Uninitialized(ty) if isinstance(ty, IntType) :
+                return Immediate(0)
             # case FunRef(name, arith):
             #     # breakpoint()
             #     return Instr('leaq', [x86_ast.Global(name),])
@@ -1536,6 +1629,7 @@ class Compiler:
                     result.append(Instr('movq', [left_arg, lhs]))
                     result.append(Instr('subq', [right_arg, lhs]))
             case Assign([lhs], FunRef(name, arith)):
+                # breakpoint()
                 lhs = self.select_arg(lhs)
                 # breakpoint()
                 result.append(Instr('leaq', [x86_ast.Global("{}".format(name)), lhs]))
@@ -1547,11 +1641,19 @@ class Compiler:
                 else:
                     result.append(Instr('movq', [arg, lhs]))
                     result.append(Instr('negq', [lhs]))
+            # TODO add a call Name('arith')
+            case Assign([Subscript(tu, slice, ctx)], value):
+                tu = self.select_arg(tu)
+                slice = self.select_arg(slice)
+                value = self.select_arg(value)
+                result.append(Instr('movq', [tu, Reg('r11')]))
+                result.append(Instr('movq', [value, Deref('r11', 8 * (slice.value + 1))]))
             case Assign([lhs], Call(Name('input_int'), [])):
                 lhs = self.select_arg(lhs)
                 result.append(Callq(label_name("read_int"), 0))
                 result.append(Instr('movq', [Reg('rax'), lhs]))
             case Assign([lhs], Call(fun, args)):
+                # breakpoint()
                 lhs = self.select_arg(lhs)
                 for i, arg in enumerate(args):
                     arg = self.select_arg(arg)
@@ -1594,23 +1696,27 @@ class Compiler:
                 result.append(Instr('sarq', [Immediate(1), Reg('r11')]))
                 result.append(Instr('sarq', [Reg('r11'), lhs]))
 
-            case Assign([lhs], Subscript(value, slice)):
+            case Assign([lhs], Subscript(value, slice, ctx)):
                 lhs = self.select_arg(lhs)
                 value = self.select_arg(value)
                 slice = self.select_arg(slice)  # slice must be int 这里没有必要
                 result.append(Instr('movq', [value, Reg('r11')]))
                 result.append(Instr('movq', [Deref('r11', 8 * (slice.value + 1)), lhs]))
-            case Assign([Subscript(tu, slice)], value):
-                tu = self.select_arg(tu)
-                slice = self.select_arg(slice)
-                value = self.select_arg(value)
-                result.append(Instr('movq', [tu, Reg('r11')]))
-                result.append(Instr('movq', [value, Deref('r11', 8 * (slice.value + 1))]))
+
             case Assign([lhs], Allocate(size, ty)):
                 lhs = self.select_arg(lhs)
 
                 # size = self.select_arg(size)
                 tag = calculate_tag(size, ty)
+                result.append(Instr("movq", [x86_ast.Global("free_ptr"), Reg('r11')]))
+                result.append(Instr("addq", [Immediate(8 * (size + 1)),  x86_ast.Global("free_ptr")]))
+                result.append(Instr("movq", [Immediate(tag), Deref('r11', 0)]))
+                result.append(Instr('movq', [Reg('r11'), lhs]))
+            case Assign([lhs], AllocateClosure(size, ty, arith)):
+                lhs = self.select_arg(lhs)
+
+                # size = self.select_arg(size)
+                tag = calculate_tag(size, ty, arith=arith)
                 result.append(Instr("movq", [x86_ast.Global("free_ptr"), Reg('r11')]))
                 result.append(Instr("addq", [Immediate(8 * (size + 1)),  x86_ast.Global("free_ptr")]))
                 result.append(Instr("movq", [Immediate(tag), Deref('r11', 0)]))
@@ -1643,7 +1749,7 @@ class Compiler:
 
     def select_instructions(self, p: Module) -> X86Program:
         # YOUR CODE HERE
-        type_check_Cfun.TypeCheckCfun().type_check(p)
+        type_check_Clambda.TypeCheckClambda().type_check(p)
         # breakpoint()
         # arg_regs
         result = []
@@ -2104,77 +2210,7 @@ class Compiler:
                         cdef.body = new_blocks
                         cdef.rsp_sub = align(8 * cdef.S + 8 * cdef.C, 16) - 8 * cdef.C
 
-        return p
-
-
-
-    ############################################################################
-    # Patch Instructions
-    ############################################################################
-
-    def patch_instr(self, i: instr) -> List[instr]:
-        match(i):
-            case Instr(instr, [x, y]) if x == y:
-                return []
-            case Instr(instr, [Deref(label_x, x), Deref(label_y, y)]):
-                return [
-                    Instr("movq", [Deref(label_x, x), Reg("rax")]),
-                    Instr(instr, [Reg("rax"), Deref(label_y, y)])
-                ]
-            case TailJump(func, arg):
-                conclusion = []
-                conclusion.extend([
-                    Instr("subq", [Immediate(8 * self.cdef.len_spill_r15), Reg("r15")]),
-                    Instr("addq", [Immediate(self.cdef.rsp_sub), Reg("rsp")]),
-                ])
-                for reg in self.cdef.extra_saved_regs[::-1]:
-                    conclusion.append(Instr("popq", [reg]))
-                conclusion.append(Instr("popq", [Reg('rbp')]))  # seem no need pop
-
-                # func may be need rbp and rbp was pop
-                return [Instr("movq", [func, Reg("rax")])]  + conclusion + [
-                    # Instr('jmp', [Reg("rax")])
-                    TailJump(Reg('rax'), arg)
-                ]
-                # breakpoint()
-            case Instr('leaq', [x, Deref(label_y, y)]):
-                return [
-                    Instr("leaq", [x, Reg("rax")]),
-                    Instr("movq", [Reg("rax"), Deref(label_y, y)]),
-
-                ]
-            case Instr(instr, [x86_ast.Global(x), Deref(label_y, y)]):
-                return [
-                    Instr("movq", [x86_ast.Global(x), Reg("rax")]),
-                    Instr("movq", [Reg("rax"), Deref(label_y, y)])
-                ]
-            case Instr('cmpq', [x, Immediate(v)]):
-                return [
-                    Instr("movq", [Immediate(v), Reg("rax")]),
-                    Instr("cmpq", [x, Reg("rax")])
-                ]
-            case Instr('movzbq', [ByteReg('bl'), Deref("rbp", y)]):
-                return [
-                    Instr("movzbq", [ByteReg('bl'), Reg("rax")]),
-                    Instr("movq", [Reg("rax"), Deref("rbp", y)])
-                ]
-            case Instr(instr, args):
-                return [i]
-            case Callq(func, num_args):
-                return [i]
-            case _:
-                return [i]
-        pass
-
-    def patch_instrs(self, ss: List[instr]) -> List[instr]:
-        result = []
-        for s in ss:
-            ns = self.patch_instr(s)
-            result.extend(ns)
-        return result
-
-    def patch_instructions(self, p: X86Program) -> X86Program:
-
+        # 执行需要提前把这些 save 好
         match(p):
             case X86ProgramDefs(defs):
                 # breakpoint()
@@ -2231,8 +2267,139 @@ class Compiler:
                     # for rbp save
                     # call itelf need be update
 
-        # breakpoint()
+
         return p
+
+    ############################################################################
+    # Patch Instructions
+    ############################################################################
+
+    def patch_instr(self, i: instr) -> List[instr]:
+        match(i):
+            case Instr(instr, [x, y]) if x == y:
+                return []
+            case Instr(instr, [Deref(label_x, x), Deref(label_y, y)]):
+                return [
+                    Instr("movq", [Deref(label_x, x), Reg("rax")]),
+                    Instr(instr, [Reg("rax"), Deref(label_y, y)])
+                ]
+            case TailJump(func, arg):
+                conclusion = []
+                conclusion.extend([
+                    Instr("subq", [Immediate(8 * self.cdef.len_spill_r15), Reg("r15")]),
+                    Instr("addq", [Immediate(self.cdef.rsp_sub), Reg("rsp")]),
+                ])
+                for reg in self.cdef.extra_saved_regs[::-1]:
+                    conclusion.append(Instr("popq", [reg]))
+                conclusion.append(Instr("popq", [Reg('rbp')]))  # seem no need pop
+
+                # func may be need rbp and rbp was pop
+                return [Instr("movq", [func, Reg("rax")])]  + conclusion + [
+                    # Instr('jmp', [Reg("rax")])
+                    TailJump(Reg('rax'), arg)
+                ]
+                # breakpoint()
+            case Instr('leaq', [x, Deref(label_y, y)]):
+                return [
+                    Instr("leaq", [x, Reg("rax")]),
+                    Instr("movq", [Reg("rax"), Deref(label_y, y)]),
+
+                ]
+            case Instr(instr, [x86_ast.Global(x), Deref(label_y, y)]):
+                return [
+                    Instr("movq", [x86_ast.Global(x), Reg("rax")]),
+                    Instr("movq", [Reg("rax"), Deref(label_y, y)])
+                ]
+            case Instr('cmpq', [x, Immediate(v)]):
+                return [
+                    Instr("movq", [Immediate(v), Reg("rax")]),
+                    Instr("cmpq", [x, Reg("rax")])
+                ]
+            case Instr('movzbq', [ByteReg('bl'), Deref("rbp", y)]):
+                return [
+                    Instr("movzbq", [ByteReg('bl'), Reg("rax")]),
+                    Instr("movq", [Reg("rax"), Deref("rbp", y)])
+                ]
+            case Instr('movq', [Immediate(n), Deref(x, y)]) if n > 4294967296:
+                return [
+                    Instr("movq", [Immediate(n), Reg("rax")]),
+                    Instr("movq", [Reg("rax"), Deref(x, y)])
+                ]
+            case Instr(instr, args):
+                return [i]
+            case Callq(func, num_args):
+                return [i]
+            case _:
+                return [i]
+        pass
+
+    def patch_instrs(self, ss: List[instr]) -> List[instr]:
+        result = []
+        for s in ss:
+            ns = self.patch_instr(s)
+            result.extend(ns)
+        return result
+
+    def patch_instructions(self, p: X86Program) -> X86Program:
+        return p
+        # match(p):
+        #     case X86ProgramDefs(defs):
+        #         # breakpoint()
+        #         for cdef in defs:
+        #
+        #             self.cdef = cdef
+        #             cdef.len_spill_r15 = len(cdef.r15_spill)
+        #             cdef.extra_saved_regs = list(set(cdef.alloc_callee_saved_regs) - {Reg("rbp")})
+        #
+        #
+        #             for label, stmts in cdef.body.items():
+        #                 result = self.patch_instrs(stmts)
+        #                 cdef.body[label] = result
+        #
+        #
+        #             start = []
+        #             start.extend([
+        #                 Instr("pushq", [Reg("rbp")]),
+        #                 Instr("movq", [Reg("rsp"), Reg("rbp")]),
+        #
+        #             ])
+        #             # save
+        #             for reg in cdef.extra_saved_regs:
+        #                 start.append(Instr("pushq", [reg]))
+        #             start.extend([Instr("subq", [Immediate(cdef.rsp_sub), Reg("rsp")])])
+        #             if cdef.name == 'main':
+        #                 start.extend([
+        #                     Instr("movq", [Immediate(65536), Reg("rdi")]),
+        #                     Instr("movq", [Immediate(65536), Reg("rsi")]),
+        #                     Callq(label_name("initialize"), 2),
+        #                     Instr("movq", [x86_ast.Global("rootstack_begin"), Reg("r15")]),
+        #                 ])
+        #
+        #             for i in range(cdef.len_spill_r15):
+        #                 start.append(Instr("movq", [Immediate(0), Deref("r15", 8 * i)]))
+        #             start.append(Instr('addq', [Immediate(8 * cdef.len_spill_r15), Reg('r15')]))
+        #             start.append(Jump(label_name("{}start".format(cdef.name))))
+        #
+        #             cdef.body[label_name('{}'.format(cdef.name))] = start
+        #             # for label , body in blocks.items():
+        #             #     pass
+        #             conclusion = []
+        #             conclusion.extend([
+        #                 Instr("subq", [Immediate(8 * cdef.len_spill_r15), Reg("r15")]),
+        #                 Instr("addq", [Immediate(cdef.rsp_sub), Reg("rsp")]),
+        #             ])
+        #             for reg in cdef.extra_saved_regs[::-1]:
+        #                 conclusion.append(Instr("popq", [reg]))
+        #             conclusion.append(Instr("popq", [Reg('rbp')]))  # seem no need pop
+        #             conclusion.append(Instr("retq", []))
+        #             # just replace
+        #             cdef.body[label_name('{}conclusion'.format(cdef.name))] = conclusion + \
+        #                 cdef.body[label_name('{}conclusion'.format(cdef.name))]
+        #             # for rbp save
+        #             # call itelf need be update
+        #
+        # # breakpoint()
+        # return p
 
     ############################################################################
     # Prelude & Conclusion
