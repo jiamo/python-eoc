@@ -1628,6 +1628,7 @@ class Compiler:
                 elif lhs == right_arg:
                     result.append(Instr('subq', [left_arg, lhs]))
                 else:
+                    # breakpoint()
                     result.append(Instr('movq', [left_arg, lhs]))
                     result.append(Instr('subq', [right_arg, lhs]))
             case Assign([lhs], FunRef(name, arith)):
@@ -1877,7 +1878,21 @@ class Compiler:
     def write_var(self, i) -> Set[location]:
         match (i):
             case Instr("movq", [s, t]):
-                return set([self.free_var(t)])
+                if r := self.free_var(t):
+                    return set([r])
+                else:
+                    return set()
+            case Instr("subq", [s, t]):
+                if r := self.free_var(t):
+                    return set([r])
+                else:
+                    return set()
+            case Instr("addq", [s, t]):
+                # breakpoint()
+                if r := self.free_var(t):
+                    return set([r])
+                else:
+                    return set()
             case Callq(func, num_args):
                 return set(caller_saved_regs)
             case IndirectCallq(func, num_args):
@@ -2344,64 +2359,7 @@ class Compiler:
 
     def patch_instructions(self, p: X86Program) -> X86Program:
         return p
-        # match(p):
-        #     case X86ProgramDefs(defs):
-        #         # breakpoint()
-        #         for cdef in defs:
-        #
-        #             self.cdef = cdef
-        #             cdef.len_spill_r15 = len(cdef.r15_spill)
-        #             cdef.extra_saved_regs = list(set(cdef.alloc_callee_saved_regs) - {Reg("rbp")})
-        #
-        #
-        #             for label, stmts in cdef.body.items():
-        #                 result = self.patch_instrs(stmts)
-        #                 cdef.body[label] = result
-        #
-        #
-        #             start = []
-        #             start.extend([
-        #                 Instr("pushq", [Reg("rbp")]),
-        #                 Instr("movq", [Reg("rsp"), Reg("rbp")]),
-        #
-        #             ])
-        #             # save
-        #             for reg in cdef.extra_saved_regs:
-        #                 start.append(Instr("pushq", [reg]))
-        #             start.extend([Instr("subq", [Immediate(cdef.rsp_sub), Reg("rsp")])])
-        #             if cdef.name == 'main':
-        #                 start.extend([
-        #                     Instr("movq", [Immediate(65536), Reg("rdi")]),
-        #                     Instr("movq", [Immediate(65536), Reg("rsi")]),
-        #                     Callq(label_name("initialize"), 2),
-        #                     Instr("movq", [x86_ast.Global("rootstack_begin"), Reg("r15")]),
-        #                 ])
-        #
-        #             for i in range(cdef.len_spill_r15):
-        #                 start.append(Instr("movq", [Immediate(0), Deref("r15", 8 * i)]))
-        #             start.append(Instr('addq', [Immediate(8 * cdef.len_spill_r15), Reg('r15')]))
-        #             start.append(Jump(label_name("{}start".format(cdef.name))))
-        #
-        #             cdef.body[label_name('{}'.format(cdef.name))] = start
-        #             # for label , body in blocks.items():
-        #             #     pass
-        #             conclusion = []
-        #             conclusion.extend([
-        #                 Instr("subq", [Immediate(8 * cdef.len_spill_r15), Reg("r15")]),
-        #                 Instr("addq", [Immediate(cdef.rsp_sub), Reg("rsp")]),
-        #             ])
-        #             for reg in cdef.extra_saved_regs[::-1]:
-        #                 conclusion.append(Instr("popq", [reg]))
-        #             conclusion.append(Instr("popq", [Reg('rbp')]))  # seem no need pop
-        #             conclusion.append(Instr("retq", []))
-        #             # just replace
-        #             cdef.body[label_name('{}conclusion'.format(cdef.name))] = conclusion + \
-        #                 cdef.body[label_name('{}conclusion'.format(cdef.name))]
-        #             # for rbp save
-        #             # call itelf need be update
-        #
-        # # breakpoint()
-        # return p
+
 
     ############################################################################
     # Prelude & Conclusion
