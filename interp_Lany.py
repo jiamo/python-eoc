@@ -25,22 +25,43 @@ class InterpLany(InterpLlambda):
 
   def arity(self, v):
     match v:
+      case Tagged(val, tag):
+        return super().arity(val)
       case Function(name, params, body, env):
         return len(params)
       case ClosureTuple(args, arity):
         return arity
       case _:
         raise Exception('Lany arity unexpected ' + repr(v))
-      
+
+  def apply_fun(self, fun, args, e):
+      match fun:
+        case Function(name, xs, body, env):
+          # breakpoint()
+          trace(f"{fun} {args=} {e} {name} {xs=} {body} {env}")
+          new_env = {x: v for (x,v) in env.items()}
+          for (x,arg) in zip(xs, args):
+              new_env[x] = arg
+          return self.interp_stmts(body, new_env)
+        case Tagged(val, tag):
+           #print("YYYY {}".format(v))
+           return super().apply_fun(val, args, e)
+        case _:
+          raise Exception('apply_fun: unexpected: ' + repr(fun))
+
   def interp_exp(self, e, env):
+
     match e:
       case Inject(value, typ):
         v = self.interp_exp(value, env)
         return Tagged(v, self.type_to_tag(typ))
       case Project(value, typ):
+        trace(".....{} {}".format(value, typ))
         v = self.interp_exp(value, env)
+        trace("#### {}".format(v))
         match v:
           case Tagged(val, tag) if self.type_to_tag(typ) == tag:
+            # print("YYYY {}".format(v))
             return val
           case _:
             raise Exception('interp project to ' + repr(typ) \
@@ -97,4 +118,5 @@ class InterpLany(InterpLlambda):
       case AnnLambda(params, returns, body):
         return Function('lambda', [x for (x,t) in params], [Return(body)], env)
       case _:
+        trace("xxxx tttt {} {}".format(e, type(e)))
         return super().interp_exp(e, env)

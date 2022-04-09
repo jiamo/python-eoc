@@ -60,6 +60,7 @@ def repr_Expr(self):
 Expr.__repr__ = repr_Expr
 
 def str_Assign(self):
+    # print('..... ', self.targets)
     return indent_stmt() + str(self.targets[0]) + ' = ' + str(self.value) + '\n'
 Assign.__str__ = str_Assign
 def repr_Assign(self):

@@ -7,7 +7,9 @@ class InterpLvar(InterpLint):
     def interp_exp(self, e, env):
         match e:
             case Name(id):
+                # arith????
                 return env[id]
+                # return env[id] if id in env else getattr(self, id)
             case _:
                 return super().interp_exp(e, env)
 

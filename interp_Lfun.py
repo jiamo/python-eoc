@@ -23,6 +23,9 @@ class InterpLfun(InterpLtup):
           for (x,arg) in zip(xs, args):
               new_env[x] = arg
           return self.interp_stmts(body, new_env)
+        # case Tagged(val, tag):
+        #    #print("YYYY {}".format(v))
+        #    return val
         case _:
           raise Exception('apply_fun: unexpected: ' + repr(fun))
     

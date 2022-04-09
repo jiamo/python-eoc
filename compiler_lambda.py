@@ -162,6 +162,7 @@ class Compiler:
         trace(result)
         return Module(result)
 
+
     def uniquify_exp(self, e, sym_map):
         match e:
             case Call(Name('input_int'), []):
@@ -401,7 +402,15 @@ class Compiler:
 
     def free_in_exp(self, bindings, e):
         match e:
-
+            # case Call(Name('input_int'), []):
+            #     return e
+            # case Call(Name(fun), args):
+            #     if fun in sym_map:
+            #         fun = sym_map.get(fun)
+            #     args = [self.uniquify_exp(i, sym_map) for i in args]
+            #     return Call(Name(fun), args)
+            # case Constant(v):
+            #     return e
             case Name(id):
                 # print(".... ", sym_map)
                 if id in bindings:
@@ -443,6 +452,7 @@ class Compiler:
             case _:
                 return set()
 
+
     def free_in_lambda_stmt(self, stmt):
         # lambda can be in any stmt
         match stmt:
@@ -462,285 +472,6 @@ class Compiler:
             case _:
                 return set()
 
-    def cast_insert_exp(self, e):
-        match e:
-            # case Call(Name('input_int'), []):
-            #     return Call(Project(e.func, FunctionType([], AnyType())), [])
-            case FunRef(name, airth):
-                args_types = [AnyType() for i in range(airth)]
-                return Inject(e, FunctionType(args_types, AnyType()))
-            case Call(x, args):
-                x = self.cast_insert_exp(x)
-                args = [self.cast_insert_exp(i) for i in args]
-                args_types = [AnyType() for i in args]
-                return Call(Project(x, FunctionType(args_types, AnyType())), args)
-            case Constant(v):
-                # breakpoint()
-                if v is True or v is False:
-                    return Inject(e, BoolType())
-                elif isinstance(v, int):
-                    return Inject(e, IntType())
-                # elif isinstance(v, Function):
-                #     return Inject(v, 'function')
-                # elif isinstance(v, list):
-                #     return Tagged(v, 'tuple')
-                # elif isinstance(v, type(None)):
-                #     return Tagged(v, 'none')
-                else:
-                    raise Exception('tag: unexpected ' + repr(v))
-            case Name(id):
-                # print(".... ", sym_map)
-                return e
-            case BinOp(left, op, right):
-                left = self.cast_insert_exp(left)
-                right = self.cast_insert_exp(right)
-                return Inject(BinOp(Project(left, IntType()), op, Project(right, IntType())), IntType())
-            case UnaryOp(op, v) if isinstance(op, USub):
-                v = self.cast_insert_exp(v)
-                v = Project(v, IntType())
-                return Inject(UnaryOp(op, v), IntType())
-            case UnaryOp(op, v) if isinstance(op, Not):
-                # one by one
-                v = self.cast_insert_exp(v)
-                v = Project(v, BoolType())
-                return Inject(UnaryOp(op, v), BoolType())
-            case Compare(left, [cmp], [right]):
-                left = self.cast_insert_exp(left)
-                left = Project(left, IntType())
-                right = self.cast_insert_exp(right)
-                right = Project(right, IntType())
-                return Inject(Compare(left, [cmp], [right]), BoolType())
-            case IfExp(expr_test, expr_body, expr_orelse):
-                # 所有的这种表达式可以用 children 来做
-                t = self.cast_insert_exp(expr_test)
-                t = Project(t, BoolType())
-                b = self.cast_insert_exp(expr_body)
-                e = self.cast_insert_exp(expr_orelse)
-                return IfExp(t, b, e)
-            case Subscript(value, slice, ctx):
-                v = self.cast_insert_exp(value)
-                s = self.cast_insert_exp(slice)
-                return Call(Name('any_tuple_load'), [v, Project(s, IntType())])
-            case Tuple(exprs, ctx):
-                exprs = [self.cast_insert_exp(i) for i in exprs]
-                exprs_types = [AnyType() for i in exprs]
-                return Inject(Tuple(exprs, ctx), TupleType(exprs_types))
-            case Lambda(params, body):
-                params = [x for x in params]
-                params_types = [AnyType() for x in params]
-                body = self.cast_insert_exp(body)
-                return Inject(Lambda(params, body), FunctionType(params_types, AnyType()))
-
-    def cast_insert_stmt(self, stmt):
-        # TODO 每次都要展开 stmt 能不能不展开，直接处理 子children
-        match stmt:
-            case Expr(Call(Name('print'), [arg])):
-                new_arg = self.cast_insert_exp(arg)
-                return Expr(Call(Name('print'), [new_arg]))
-            case Expr(value):
-                expr = self.cast_insert_exp(value)
-                return Expr(expr)
-            case Assign([Name(x)], value):
-                v_expr = self.cast_insert_exp(value)
-                return Assign(stmt.targets, v_expr)
-            case If(test, body, orelse):
-                test_expr = self.cast_insert_exp(test)
-                body_stmts = []
-                for s in body:
-                    body_stmts.append(self.cast_insert_stmt(s))
-                orelse_stmts = []
-                for s in orelse:
-                    orelse_stmts.append(self.cast_insert_stmt(s))
-                return If(test_expr, body_stmts, orelse_stmts)
-            case While(test, body, []):
-                test_expr = self.cast_insert_exp(test)
-                body_stmts = []
-                for s in body:
-                    body_stmts.append(self.cast_insert_stmt(s))
-                return While(test_expr, body_stmts, [])
-            case Return(expr):
-                expr = self.cast_insert_exp(expr)
-                return Return(expr)
-            case AnnAssign(Name(name), typ, value, simple):
-                value = self.cast_insert_exp(value)
-                return AnnAssign(Name(name), typ, value, simple)
-
-    def cast_insert(self, p):
-        # YOUR CODE HERE
-        trace(p)
-        result = []
-        match p:
-            case Module(body):
-                # breakpoint()
-                for s in body:
-                    # breakpoint()
-                    match s:
-                        case FunctionDef(fun, args, stmts, dl, returns, comment):
-                            new_stmts = []
-                            for s in stmts:
-                                new_stmts.append(self.cast_insert_stmt(s))
-                            result.append(FunctionDef(fun, args, new_stmts, dl, returns, comment))
-                result = Module(result)
-            case _:
-                raise Exception('interp: unexpected ' + repr(p))
-
-        trace(result)
-        return result
-
-    def reveal_casts_exp(self, e):
-        match e:
-            # case Call(Name('input_int'), []):
-            #     return Call(Project(e.func, FunctionType([], AnyType())), [])
-            case Project(e, ftype):
-                match ftype:
-                    case BoolType() | IntType():
-                        tmp = Name(generate_name("tmp"))
-                        e = self.reveal_casts_exp(e)
-                        return Begin([Assign([tmp], e)],
-                                     IfExp(Compare(TagOf(tmp), [Eq()], [Constant(TagOf(ftype))]),
-                                           ValueOf(tmp, ftype),
-                                           Call(Name('exit'), [])))
-                    case TupleType(t):
-                        tmp = Name(generate_name("tmp"))
-                        e = self.reveal_casts_exp(e)
-                        return Begin([Assign([tmp], e)],
-                                     IfExp(Compare(TagOf(tmp), [Eq()], [Constant(TagOf(ftype))]),
-                                           IfExp(
-                                               Compare(
-                                                   Call(Name('len'), [ValueOf(tmp, ftype)]),
-                                                   [Eq()],
-                                                   [Constant(len(t))]),
-                                               ValueOf(tmp, ftype),
-                                               Call(Name('exit'), [])),
-                                           Call(Name('exit'), [])))
-                    case FunctionType(args, returns):
-                        tmp = Name(generate_name("tmp"))
-                        e = self.reveal_casts_exp(e)
-                        return Begin([Assign([tmp], e)],
-                                     IfExp(Compare(TagOf(tmp), [Eq()], [Constant(TagOf(ftype))]),
-                                           IfExp(Compare(Call(Name('arity'), [ValueOf(tmp, ftype)]), [Eq()],
-                                                         [Constant(len(args))]),
-                                                  ValueOf(tmp, ftype),
-                                                  Call(Name('exit'), [])),
-                                           Call(Name('exit'), [])))
-            case Inject(x, ftype):
-                x = self.reveal_casts_exp(x)
-                return Call(Name('make_any'), [x, Constant(TagOf(ftype))])
-            case FunRef(name, airth):
-                return e
-            case Call(Name('any_tuple_load'), [e1,e2]):
-                breakpoint()
-                tmp1 = Name(generate_name('tmp'))
-                tmp2 = Name(generate_name("tmp"))
-                e1 = self.cast_insert_exp(e1)
-                e2 = self.cast_insert_exp(e2)
-                return Begin(
-                    [Assign([tmp1], e1), Assign([tmp2], e2)],
-                    IfExp(Compare(TagOf(tmp1), [Eq()], [Constant(2)]),
-                          IfExp(Compare(tmp2, [Lt()], [Call(Name('any_len'), [tmp1])]),
-                                Call(Name('any_tuple_load_unsafe'), [tmp1, tmp2]),
-                                Call(Name('exit'), [])),
-                          Call(Name('exit'), []))
-                )
-            case Call(x, args):
-                x = self.reveal_casts_exp(x)
-                args = [self.reveal_casts_exp(i) for i in args]
-                return Call(x, args)
-            case Constant(v):
-                return e
-            case Name(id):
-                # print(".... ", sym_map)
-                return e
-            case BinOp(left, op, right):
-                left = self.reveal_casts_exp(left)
-                right = self.reveal_casts_exp(right)
-                return BinOp(left, op, right)
-            case UnaryOp(op, v):
-                v = self.reveal_casts_exp(v)
-                return UnaryOp(op, v)
-            case Compare(left, [cmp], [right]):
-                left = self.reveal_casts_exp(left)
-                right = self.reveal_casts_exp(right)
-                return Compare(left, [cmp], [right])
-            case IfExp(expr_test, expr_body, expr_orelse):
-                # 所有的这种表达式可以用 children 来做
-                t = self.reveal_casts_exp(expr_test)
-                b = self.reveal_casts_exp(expr_body)
-                e = self.reveal_casts_exp(expr_orelse)
-                return IfExp(t, b, e)
-            case Subscript(value, slice, ctx):
-                v = self.reveal_casts_exp(value)
-                s = self.reveal_casts_exp(slice)
-                return Subscript(v, s, ctx)
-            case Tuple(exprs, ctx):
-                exprs = [self.reveal_casts_exp(i) for i in exprs]
-                return Tuple(exprs, ctx)
-            case Lambda(params, body):
-                # The real type is knowing.....?
-                params = [(x, AnyType()) for x in params]
-                body = self.reveal_casts_exp(body)
-                return AnnLambda(params, AnyType(), body)
-            case _:
-                raise Exception('interp: reveal_casts_exp ' + repr(e))
-
-    def reveal_casts_stmt(self, stmt):
-        # TODO 每次都要展开 stmt 能不能不展开，直接处理 子children
-        match stmt:
-            case Expr(Call(Name('print'), [arg])):
-                new_arg = self.reveal_casts_exp(arg)
-                return Expr(Call(Name('print'), [new_arg]))
-            case Expr(value):
-                expr = self.reveal_casts_exp(value)
-                return Expr(expr)
-            case Assign([Name(x)], value):
-                v_expr = self.reveal_casts_exp(value)
-                return Assign(stmt.targets, v_expr)
-            case If(test, body, orelse):
-                test_expr = self.reveal_casts_exp(test)
-                body_stmts = []
-                for s in body:
-                    body_stmts.append(self.reveal_casts_stmt(s))
-                orelse_stmts = []
-                for s in orelse:
-                    orelse_stmts.append(self.reveal_casts_stmt(s))
-                return If(test_expr, body_stmts, orelse_stmts)
-            case While(test, body, []):
-                test_expr = self.reveal_casts_exp(test)
-                body_stmts = []
-                for s in body:
-                    body_stmts.append(self.reveal_casts_stmt(s))
-                return While(test_expr, body_stmts, [])
-            case Return(expr):
-                expr = self.reveal_casts_exp(expr)
-                return Return(expr)
-            case AnnAssign(Name(name), typ, value, simple):
-                value = self.reveal_casts_exp(value)
-                return AnnAssign(Name(name), typ, value, simple)
-            case _:
-                raise Exception('interp: reveal_casts_stmt ' + repr(stmt))
-
-
-    def reveal_casts(self, p):
-        # YOUR CODE HERE
-        trace(p)
-        result = []
-        match p:
-            case Module(body):
-                # breakpoint()
-                for s in body:
-                    # breakpoint()
-                    match s:
-                        case FunctionDef(fun, args, stmts, dl, returns, comment):
-                            new_stmts = []
-                            for s in stmts:
-                                new_stmts.append(self.reveal_casts_stmt(s))
-                            result.append(FunctionDef(fun, args, new_stmts, dl, returns, comment))
-                result = Module(result)
-            case _:
-                raise Exception('interp: unexpected ' + repr(p))
-
-        trace(result)
-        return result
 
     def convert_assignments_exp(self, e):
         match e:
@@ -764,8 +495,9 @@ class Compiler:
                 return  BinOp(left, op, right)
             case UnaryOp(op, v):
                 # one by one
-                v = self.convert_assignments_exp(v)
+                v =  self.convert_assignments_exp(v)
                 return UnaryOp(op, v)
+
             case Compare(left, [cmp], [right]):
                 left = self.convert_assignments_exp(left)
                 right = self.convert_assignments_exp(right)
@@ -1024,6 +756,14 @@ class Compiler:
                 value = self.convert_to_closures_exp(value)
                 self.lambda_exp[Name(name)]  = value
                 return Assign([Name(name)], value)
+    #
+    # def convert_return_to_closure_type(self, r):
+    #     match r:
+    #         case FunctionType(argtypes, returns):
+    #             # 我需要知道它返回一个closure 里面的 自由变量的type
+    #             return TupleType
+    #         case _:
+    #             return r
 
     def find_last_stmt_return(self, stmt):
         # if it was return
@@ -1033,6 +773,7 @@ class Compiler:
             case If(test, body, orelse):
                 # breakpoint()
                 return self.find_last_stmt_return(body[-1])
+
 
     def convert_to_closures(self, p):
         result = []
@@ -1067,7 +808,10 @@ class Compiler:
         trace(result)
         return Module(result)
 
+
+    # 改函数和参数一起
     def limit_functions_exp(self, e, func_arg_map, args_map):
+        # TODO lambda 也有 超过 7 个参数的怎么办
         match e:
             case Call(Name('input_int'), []):
                 return e
