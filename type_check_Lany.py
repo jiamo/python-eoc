@@ -48,9 +48,30 @@ class TypeCheckLany(TypeCheckLlambda):
         return_t = self.type_check_exp(body, new_env)
         self.check_type_equal(returns, return_t, e)
         return FunctionType([t for (x,t) in params], return_t)
+      case Constant(value) if isinstance(value, TagOf):
+        # return self.type_check_exp(value, env)
+        return IntType()
       case _:
         return super().type_check_exp(e, env)
-    
+
+  def type_check_stmts(self, ss, env):
+    if len(ss) == 0:
+      return
+    match ss[0]:
+      case Assign([v], value) if isinstance(v, Name):
+        t = self.type_check_exp(value, env)
+        if v.id in env:
+          self.check_type_equal(env[v.id], t, value)
+        else:
+          env[v.id] = t
+        v.has_type = env[v.id]
+        return self.type_check_stmts(ss[1:], env)
+      case Expr(Call(Name('print'), [arg])):
+        t = self.type_check_exp(arg, env)
+        self.check_type_equal(t, AnyType(), arg)   # we make all return is AnyType now
+        return self.type_check_stmts(ss[1:], env)
+      case _:
+        return super().type_check_stmts(ss, env)
   # def check_exp(self, e, ty, env):
   #   match e:
   #     case Call(Name('make_any'), [value, tag]):
@@ -68,3 +89,22 @@ class TypeCheckLany(TypeCheckLlambda):
   #   t = self.type_check_exp(e, env)
   #   self.check_type_equal(t, ty, e)
         
+  def type_check(self, p):
+    #trace('*** type check Llambda')
+    match p:
+      case Module(body):
+        env = {}
+        for s in body:
+            match s:
+              case FunctionDef(name, params, bod, dl, returns, comment):
+                if isinstance(params, ast.arguments):
+                    params_t = [self.parse_type_annot(p.annotation) \
+                                for p in params.args]
+                    returns_t = self.parse_type_annot(returns)
+                else:
+                    params_t = [t for (x,t) in params]
+                    returns_t = returns
+                env[name] = FunctionType(params_t, returns_t)
+        self.check_stmts(body, AnyType(), env)
+      case _:
+        raise Exception('type_check: unexpected ' + repr(p))

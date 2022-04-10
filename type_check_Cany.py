@@ -42,6 +42,7 @@ class TypeCheckCany(TypeCheckClambda):
             return IntType()
           case _:
             raise Exception('type_check_exp arity unexpected ' + repr(ty))
+
       case _:
         return super().type_check_exp(e, env)
    

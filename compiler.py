@@ -22,7 +22,9 @@ import type_check_Ctup
 import type_check_Lfun
 import type_check_Cfun
 import type_check_Llambda
+import type_check_Lany
 import type_check_Clambda
+import type_check_Cany
 
 
 Binding = Tupling[Name, expr]
@@ -577,8 +579,11 @@ class Compiler:
                     match s:
                         case FunctionDef(fun, args, stmts, dl, returns, comment):
                             new_stmts = []
+                            args = [(i[0], AnyType()) for i in args]
                             for s in stmts:
                                 new_stmts.append(self.cast_insert_stmt(s))
+                            # For type check!!!
+                            returns = AnyType() # ?
                             result.append(FunctionDef(fun, args, new_stmts, dl, returns, comment))
                 result = Module(result)
             case _:
@@ -751,6 +756,13 @@ class Compiler:
                 return Call(x, args)
             case Constant(v):
                 return e
+            case TagOf(value):
+                value = self.convert_assignments_exp(value)
+                return TagOf(value)
+                pass
+            case ValueOf(value, typ):
+                value = self.convert_assignments_exp(value)
+                return ValueOf(value, typ)
             case Name(id):
                 # print(".... ", sym_map)
                 if id not in self.box_dict:
@@ -761,7 +773,11 @@ class Compiler:
             case BinOp(left, op, right):
                 left = self.convert_assignments_exp( left)
                 right = self.convert_assignments_exp( right)
-                return  BinOp(left, op, right)
+                return BinOp(left, op, right)
+            case Begin(stmts, result):
+                stmts = [self.convert_assignments_stmt(i) for i in stmts]
+                result = self.convert_assignments_exp(result)
+                return Begin(stmts, result)
             case UnaryOp(op, v):
                 # one by one
                 v = self.convert_assignments_exp(v)
@@ -790,7 +806,12 @@ class Compiler:
                 # lambda params have not type
                 body = self.convert_assignments_exp(body)
                 return Lambda(params, body)
-
+            case AnnLambda(params, returns, body):
+                # lambda params have not type
+                body = self.convert_assignments_exp(body)
+                return AnnLambda(params, returns, body)
+            case _:
+                raise Exception('interp: convert_assignments_exp ' + repr(e))
 
     def convert_assignments_stmt(self, stmt):
         # lambda can be in any stmt
@@ -832,7 +853,7 @@ class Compiler:
 
     def convert_assignments(self, p: Module) -> Module:
         result = []
-        type_check_Llambda.TypeCheckLlambda().type_check(p)
+        type_check_Lany.TypeCheckLany().type_check(p)
         self.name_type_dict = {}
         self.top_funs = set()
         match p:
@@ -877,32 +898,58 @@ class Compiler:
 
     def convert_to_closures_exp(self, e):
         match e:
-            case Call(Name('input_int'), []):
-                return e
-            case Call(FunRef(name, n), args):
-                # breakpoint()
+            # case Call(Name('input_int'), []):
+            case Call(Name(x), args):
                 args = [self.convert_to_closures_exp(i) for i in args]
-                # return Call(x, args)
+                return Call(Name(x), args)
+            case FunRef(name, n):
                 if name in self.top_funs:
                     c = Closure(n, [FunRef(name, n)])
-                    tmp = generate_name("clos")
-                    return Begin(
-                        [Assign([Name(tmp)], c)],
-                        Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
-                    )
+                    # tmp = generate_name("clos")
+                    # return Begin(
+                    #     [Assign([Name(tmp)], c)],
+                    #     Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
+                    # )
                 else:
                     # 这里为什么不能用 FunRef 因为这里不在是 FunRef 了
                     # 最终的 FunRef 在 closure 的第一个元素力
                     # c = FunRef(name, n) 这个错误居然到等到 select_stmt 才能发现
                     c = Name(name)
                     # 默认 这个 name 已经返回成 closure
-                    tmp = generate_name("clos")
-                    return Begin(
-                        [Assign([Name(tmp)], c)],
-                        Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
-                    )
-
-
+                return c
+            case Call(x, args):
+                # breakpoint()
+                args = [self.convert_to_closures_exp(i) for i in args]
+                c = self.convert_to_closures_exp(x)
+                # return Call(x, args)
+                # if name in self.top_funs:
+                #     c = Closure(n, [FunRef(name, n)])
+                #     # tmp = generate_name("clos")
+                #     # return Begin(
+                #     #     [Assign([Name(tmp)], c)],
+                #     #     Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
+                #     # )
+                # else:
+                #     # 这里为什么不能用 FunRef 因为这里不在是 FunRef 了
+                #     # 最终的 FunRef 在 closure 的第一个元素力
+                #     # c = FunRef(name, n) 这个错误居然到等到 select_stmt 才能发现
+                #     c = Name(name)
+                #     # 默认 这个 name 已经返回成 closure
+                tmp = generate_name("clos")
+                return Begin(
+                    [Assign([Name(tmp)], c)],
+                    Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
+                )
+            case Begin(stmts, exp):
+                stmts = [self.convert_to_closures_stmt(i) for i in stmts]
+                exp = self.convert_to_closures_exp(exp)
+                return Begin(stmts, exp)
+            case TagOf(value):
+                value = self.convert_to_closures_exp(value)
+                return TagOf(value)
+            case ValueOf(value, typ):
+                value = self.convert_to_closures_exp(value)
+                return ValueOf(value, typ)
             case Constant(v):
                 return e
             case Name(id):
@@ -981,7 +1028,45 @@ class Compiler:
                 c = Closure(n, [FunRef(name, n), *free_named_vars])  # save the free_named_vars into the cloure
                 c.closure_type = closureTy
                 return c
+            case AnnLambda(params, returns, body):
+                # breakpoint()
+                # lambda params have not type
+                # body = self.convert_to_closures_exp(body)
+                # fvs.2:(bot,(int),(int)),z:int
+                name = generate_name('lambda')
+                n = len(params)
 
+                free_vars = list(self.free_in_exp(params, body))
+                # free_vars return the name.....
+                free_named_vars = [Name(i) for i in free_vars]
+                free_types = [self.name_type_dict[i] for i in free_vars]
+                # breakpoint()
+                lambda_parms = []
+                stmts = []
+                closTy = TupleType([Bottom(), *[self.name_type_dict[i] for i in free_vars]])
+                fsv_name = generate_name('fvs')
+                lambda_parms.append((fsv_name, closTy))
+                for i in params:
+                    # breakpoint()
+                    # breakpoint()
+                    lambda_parms.append(i)
+
+                for i, v in enumerate(free_named_vars):
+                    stmts.append(Assign([v], Subscript(Name(fsv_name), Constant(i+1), Load())))
+
+                # breakpoint()
+                # TODO may be we need just trust the Annlambda
+                # returns = self.tmp_ann_typ.ret_type
+
+                # May be the return was function type again and need to convertion to closure type TODO
+                lambda_def = FunctionDef(name, lambda_parms, stmts + [Return(body)], None, returns, None)
+                self.lambda_convert_defs.append(lambda_def)
+
+                # The return type was
+                closureTy = TupleType([FunctionType([i[1] for i in lambda_parms], returns), *free_types])
+                c = Closure(n, [FunRef(name, n), *free_named_vars])  # save the free_named_vars into the cloure
+                c.closure_type = closureTy
+                return c
             case Uninitialized(ty):
                 return e
             case _:
@@ -989,16 +1074,16 @@ class Compiler:
 
     def convert_to_closures_stmt(self, stmt):
         match stmt:
-            case Expr(Call(Name('print'), [arg])):
-                new_arg = self.convert_to_closures_exp(arg)
-                return Expr(Call(Name('print'), [new_arg]))
+            case Expr(Call(x, args)):
+                new_args = [self.convert_to_closures_exp(i) for i in args]
+                return Expr(Call(x, args))
             case Expr(value):
                 expr = self.convert_to_closures_exp(value)
                 return Expr(expr)
             case Assign([l], value):
-                l = self.convert_to_closures_exp(l)
+                # TODO l need do?
+                # l = self.convert_to_closures_exp(l)
                 v_expr = self.convert_to_closures_exp(value)
-
                 return Assign(stmt.targets, v_expr)
             case If(test, body, orelse):
                 test_expr = self.convert_to_closures_exp(test)
@@ -1036,7 +1121,7 @@ class Compiler:
 
     def convert_to_closures(self, p):
         result = []
-        type_check_Llambda.TypeCheckLlambda().type_check(p)
+        type_check_Lany.TypeCheckLany().type_check(p)
         # self.name_type_dict = {}
         self.lambda_convert_defs = []
         self.lambda_exp = {}
@@ -1060,7 +1145,7 @@ class Compiler:
 
                             result.append(FunctionDef(x, args, stmts, dl, returns, comment))
             case _:
-                raise Exception('convert_assignments: unexpected ' + repr(p))
+                raise Exception('convert_to_closures: unexpected ' + repr(p))
         # breakpoint()
         type_check_Llambda.TypeCheckLlambda().type_check(p)
         result = self.lambda_convert_defs + result

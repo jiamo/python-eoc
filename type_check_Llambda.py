@@ -106,6 +106,7 @@ class TypeCheckLlambda(TypeCheckLfun):
         else:
           env[v.id] = self.type_check_exp(value, env)
         v.has_type = env[v.id]
+        trace("xxxxx {}".format(return_ty))
         self.check_stmts(ss[1:], return_ty, env)
       case Assign([Subscript(tup, Constant(index), Store())], value):
         tup_t = self.type_check_exp(tup, env)

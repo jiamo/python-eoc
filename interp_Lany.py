@@ -118,5 +118,5 @@ class InterpLany(InterpLlambda):
       case AnnLambda(params, returns, body):
         return Function('lambda', [x for (x,t) in params], [Return(body)], env)
       case _:
-        trace("xxxx tttt {} {}".format(e, type(e)))
+        # trace("xxxx tttt {} {}".format(e, type(e)))
         return super().interp_exp(e, env)
