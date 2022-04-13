@@ -709,7 +709,8 @@ class Compiler:
                 self.lambda_convert_defs.append(lambda_def)
 
                 # The return type was
-                closureTy = TupleType([FunctionType([i[1] for i in lambda_parms], returns), *free_types])
+                # closureTy = TupleType([FunctionType([i[1] for i in lambda_parms], returns), *free_types])
+                closureTy = TupleType([FunctionType([i[1] for i in lambda_parms], returns)])
                 c = Closure(n, [FunRef(name, n), *free_named_vars])  # save the free_named_vars into the cloure
                 c.closure_type = closureTy
                 return c

@@ -115,6 +115,13 @@ class InterpLany(InterpLlambda):
             return val
           case _:
             raise Exception('interp ValueOf unexpected ' + repr(v))
+      case Subscript(tup, index, Load()):
+        t = self.interp_exp(tup, env)
+        n = self.interp_exp(index, env)
+        if isinstance(t, Tagged):
+          t = t.value
+        trace(f"$$$$$$$$$$ {tup=} {t=} ; {index=} {n=} ")
+        return t[n]
       case AnnLambda(params, returns, body):
         return Function('lambda', [x for (x,t) in params], [Return(body)], env)
       case _:
