@@ -46,6 +46,7 @@ class InterpLif(InterpLvar):
       case Compare(left, [cmp], [right]):
         l = self.interp_exp(left, env)
         r = self.interp_exp(right, env)
+        trace(f"{left= }{l=} check {r=} {right=}")
         return self.interp_cmp(cmp)(l, r)
       # case Let(Name(x), rhs, body):
       #   v = self.interp_exp(rhs, env)
