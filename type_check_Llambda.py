@@ -10,6 +10,7 @@ import typing
 class TypeCheckLlambda(TypeCheckLfun):
 
   def type_check_exp(self, e, env):
+    trace("^^^^ {} {}".format(e, repr(e)))
     match e:
       case Name(id):
         e.has_type = env[id]

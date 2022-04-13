@@ -903,38 +903,18 @@ class Compiler:
                 args = [self.convert_to_closures_exp(i) for i in args]
                 return Call(Name(x), args)
             case FunRef(name, n):
+                # c = Closure(n, [FunRef(name, n)])
+                # print("... name is {}".format(name))
                 if name in self.top_funs:
+                    # breakpoint()
                     c = Closure(n, [FunRef(name, n)])
-                    # tmp = generate_name("clos")
-                    # return Begin(
-                    #     [Assign([Name(tmp)], c)],
-                    #     Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
-                    # )
                 else:
-                    # 这里为什么不能用 FunRef 因为这里不在是 FunRef 了
-                    # 最终的 FunRef 在 closure 的第一个元素力
-                    # c = FunRef(name, n) 这个错误居然到等到 select_stmt 才能发现
                     c = Name(name)
-                    # 默认 这个 name 已经返回成 closure
                 return c
             case Call(x, args):
                 # breakpoint()
                 args = [self.convert_to_closures_exp(i) for i in args]
                 c = self.convert_to_closures_exp(x)
-                # return Call(x, args)
-                # if name in self.top_funs:
-                #     c = Closure(n, [FunRef(name, n)])
-                #     # tmp = generate_name("clos")
-                #     # return Begin(
-                #     #     [Assign([Name(tmp)], c)],
-                #     #     Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
-                #     # )
-                # else:
-                #     # 这里为什么不能用 FunRef 因为这里不在是 FunRef 了
-                #     # 最终的 FunRef 在 closure 的第一个元素力
-                #     # c = FunRef(name, n) 这个错误居然到等到 select_stmt 才能发现
-                #     c = Name(name)
-                #     # 默认 这个 name 已经返回成 closure
                 tmp = generate_name("clos")
                 return Begin(
                     [Assign([Name(tmp)], c)],
@@ -953,20 +933,18 @@ class Compiler:
             case Constant(v):
                 return e
             case Name(id):
-                # TODO Namie(id) is global function name and it is not escape
-                # TODO we need change it  Closure(n, [FunRef(name, n)])
-                # print(".... ", sym_map)
+                # breakpoint()
+                print("id is .... {}".format(id))
                 if id not in self.box_dict:
                     return e
                 else:
-                    # breakpoint()
                     return Subscript(Name(self.box_dict[id]), Constant(0), Load())
             case BinOp(left, op, right):
                 # breakpoint()
                 left = self.convert_to_closures_exp( left)
                 # breakpoint()
                 right = self.convert_to_closures_exp( right)
-                return  BinOp(left, op, right)
+                return BinOp(left, op, right)
             case UnaryOp(op, v):
                 # one by one
                 v = self.convert_to_closures_exp(v)
@@ -978,7 +956,6 @@ class Compiler:
                 return Compare(left, [cmp], [right])
 
             case IfExp(expr_test, expr_body, expr_orelse):
-                # 所有的这种表达式可以用 children 来做
                 t = self.convert_to_closures_exp(expr_test)
                 b = self.convert_to_closures_exp(expr_body)
                 e = self.convert_to_closures_exp(expr_orelse)
@@ -993,10 +970,6 @@ class Compiler:
                 return Tuple(exprs, ctx)
                 # return Subscript(new_value, slice, ctx)
             case Lambda(params, body):
-                # breakpoint()
-                # lambda params have not type
-                # body = self.convert_to_closures_exp(body)
-                # fvs.2:(bot,(int),(int)),z:int
                 name = generate_name('lambda')
                 n = len(params)
 
@@ -1029,18 +1002,12 @@ class Compiler:
                 c.closure_type = closureTy
                 return c
             case AnnLambda(params, returns, body):
-                # breakpoint()
-                # lambda params have not type
-                # body = self.convert_to_closures_exp(body)
-                # fvs.2:(bot,(int),(int)),z:int
                 name = generate_name('lambda')
                 n = len(params)
 
                 free_vars = list(self.free_in_exp(params, body))
-                # free_vars return the name.....
                 free_named_vars = [Name(i) for i in free_vars]
                 free_types = [self.name_type_dict[i] for i in free_vars]
-                # breakpoint()
                 lambda_parms = []
                 stmts = []
                 closTy = TupleType([Bottom(), *[self.name_type_dict[i] for i in free_vars]])
@@ -1107,7 +1074,7 @@ class Compiler:
                 # breakpoint()
                 self.tmp_ann_typ = typ
                 value = self.convert_to_closures_exp(value)
-                self.lambda_exp[Name(name)]  = value
+                self.lambda_exp[Name(name)] = value
                 return Assign([Name(name)], value)
 
     def find_last_stmt_return(self, stmt):
@@ -1147,7 +1114,7 @@ class Compiler:
             case _:
                 raise Exception('convert_to_closures: unexpected ' + repr(p))
         # breakpoint()
-        type_check_Llambda.TypeCheckLlambda().type_check(p)
+        type_check_Lany.TypeCheckLany().type_check(p)
         result = self.lambda_convert_defs + result
         trace(result)
         return Module(result)
@@ -1191,7 +1158,7 @@ class Compiler:
             case IfExp(expr_test, expr_body, expr_orelse):
                 test_expr = self.limit_functions_exp(expr_test, func_arg_map, args_map)
                 body = self.limit_functions_exp(expr_body, func_arg_map, args_map)
-                orelse_expr  = self.limit_functions_exp(expr_orelse, func_arg_map, args_map)
+                orelse_expr = self.limit_functions_exp(expr_orelse, func_arg_map, args_map)
                 return IfExp(test_expr, body, orelse_expr)
 
             case Subscript(value, slice, ctx):
