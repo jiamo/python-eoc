@@ -3,10 +3,24 @@ from interp_Ldyn import Tagged
 from interp_Llambda import ClosureTuple
 from interp_Clambda import InterpClambda
 from utils import *
+from interp_Lfun import Function
+
 
 class InterpCany(InterpClambda):
 
+  def arity(self, v):
+    match v:
+      case Function(name, params, body, env):
+        return len(params)
+      case ClosureTuple(args, arity):
+        return arity
+      case Tagged(value):
+        return self.arity(value)
+      case _:
+        raise Exception('Cany arity unexpected ' + repr(v))
+
   def interp_exp(self, e, env):
+    # trace(f"^^^^^^^^ {e=} ")
     match e:
       case Call(Name('make_any'), [value, tag]):
         v = self.interp_exp(value, env)
@@ -54,5 +68,11 @@ class InterpCany(InterpClambda):
             return len(value)
           case _:
             raise Exception('interp any_len unexpected ' + repr(v))
+      case Subscript(tup, index, Load()):
+        t = self.interp_exp(tup, env)
+        n = self.interp_exp(index, env)
+        if isinstance(t, Tagged):
+          t = t.value
+        return t[n]
       case _:
         return super().interp_exp(e, env)

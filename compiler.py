@@ -1246,8 +1246,9 @@ class Compiler:
 
     def limit_functions_exp(self, e, func_arg_map, args_map):
         match e:
-            case Call(Name('input_int'), []):
-                return e
+            case Call(Name(x), args):
+                args = [self.limit_functions_exp(i, func_arg_map, args_map) for i in args]
+                return Call(Name(x), args)
             case Call(FunRef(name, arth), args):
                 args = [self.limit_functions_exp(i, func_arg_map, args_map) for i in args]
 
@@ -1258,6 +1259,10 @@ class Compiler:
                 else:
                     return e
             case Constant(v):
+                return e
+            case TagOf(v):
+                return e
+            case ValueOf(v, t):
                 return e
             case Name(id):
                 if id in args_map:
@@ -1311,13 +1316,13 @@ class Compiler:
                 result = self.limit_functions_exp(result, func_arg_map, args_map)
                 return Begin(stmts, result)
             case _:
-                raise Exception('limit: unexpected ' + repr(e))
+                raise Exception('limit exp: unexpected ' + repr(e))
 
     def limit_functions_stmt(self, stmt, func_args_map, args_map):
         match stmt:
-            case Expr(Call(Name('print'), [arg])):
+            case Expr(Call(Name(x), [arg])):
                 new_arg = self.limit_functions_exp(arg, func_args_map, args_map)
-                return Expr(Call(Name('print'), [new_arg]))
+                return Expr(Call(Name(x), [new_arg]))
             case Expr(value):
                 expr = self.limit_functions_exp(value, func_args_map, args_map)
                 return Expr(expr)
@@ -1501,6 +1506,10 @@ class Compiler:
                 return exp, []
             case Constant(x):
                 return exp, []
+            case TagOf(x):
+                return exp, []  # we don't have tuple in Tag
+            case ValueOf(x):
+                return exp, []
             case FunRef(x, n):
                 return exp, []
             case Begin(body, exp):
@@ -1543,9 +1552,9 @@ class Compiler:
         # result = []
         # breakpoint()
         match s:
-            case Expr(Call(Name('print'), [arg])):
+            case Expr(Call(Name(x), [arg])):
                 new_arg, stmts = self.expose_allocation_exp(arg)
-                return stmts + [Expr(Call(Name('print'), [new_arg]))]
+                return stmts + [Expr(Call(Name(x), [new_arg]))]
             case Expr(value):
                 expr, stmts = self.expose_allocation_exp(value)
                 return stmts + [Expr(expr)]
@@ -1577,7 +1586,7 @@ class Compiler:
     def expose_allocation(self, p):
         # YOUR CODE HERE
         trace(p)
-        type_check_Llambda.TypeCheckLlambda().type_check(p)
+        type_check_Lany.TypeCheckLany().type_check(p)
         result = []
         match p:
             case Module(body):
@@ -1592,7 +1601,7 @@ class Compiler:
                             result.append(FunctionDef(fun, args, new_stmts, dl, returns, comment))
                 result = Module(result)
             case _:
-                raise Exception('interp: unexpected ' + repr(p))
+                raise Exception('interp: expose_allocation unexpected ' + repr(p))
 
         # breakpoint()
         trace(result)
@@ -1649,8 +1658,25 @@ class Compiler:
                     return e, []
             case Constant(value):
                 return e, []
-            case Call(Name('input_int'), []):
-                return e, []  # beachse match e was
+            case TagOf(value):
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    # v_tmps.append()
+                    return tmp, [(tmp, e)]
+                else:
+                    return e, []
+            case ValueOf(value, ty):
+                # we think the value was must of tmp TODO may be it is not right
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    # v_tmps.append()
+                    return tmp, [(tmp, e)]
+                else:
+                    return e, []
+
+            # TODO check it is right for normal exp
+            # case Call(Name('input_int'), []):
+            #     return e, []  # beachse match e was
             case Compare(left, [cmp], [right]):
                 left_expr, left_tmps = self.rco_exp(left, True)
                 right_expr, right_tmps = self.rco_exp(right, True)
@@ -1789,7 +1815,7 @@ class Compiler:
     def remove_complex_operands(self, p: Module) -> Module:
         # YOUR CODE HERE
         trace(p)
-        type_check_Llambda.TypeCheckLlambda().type_check(p)
+        type_check_Lany.TypeCheckLany().type_check(p)
         result = []
         match p:
             case Module(body):
@@ -1807,7 +1833,7 @@ class Compiler:
                 raise Exception('interp: unexpected ' + repr(p))
 
         # breakpoint()
-        type_check_Llambda.TypeCheckLlambda().type_check(p)
+        type_check_Lany.TypeCheckLany().type_check(p)
         trace(result)
         return result
 
@@ -1891,6 +1917,8 @@ class Compiler:
 
     def explicate_tail(self, exp, basic_blocks) ->  List[stmt]:
         match exp:
+            case Call(Name('make_any'), args):
+                return [Return(exp)]
             case Call(fun, args):
                 # breakpoint()
                 return [Return(TailCall(fun, args))]
