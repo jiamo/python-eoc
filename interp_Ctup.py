@@ -16,6 +16,7 @@ class InterpCtup(InterpCif):
         array = [None] * length
         return array
       case Begin(ss, e):
+        trace("..... {}".format(ss))
         self.interp_stmts(ss, env)
         return self.interp_exp(e, env)
       case GlobalValue(name):

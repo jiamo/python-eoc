@@ -47,7 +47,7 @@ op_dict = {
 tagof (IntType()) = 001   1 
 tagof (BoolType()) = 100   4
 tagof (TupleType(ts)) = 010  2
-tagof(FunctionType(ps, rt))=011 3  
+tagof (FunctionType(ps, rt))= 011 3  
 tagof (type(None)) = 101  5
 """
 
@@ -1690,13 +1690,18 @@ class Compiler:
                     return return_expr, left_tmps
 
             case IfExp(expr_test, expr_body, expr_orelse):
-                test_expr, test_tmps = self.rco_exp(expr_test, True)
-                body, body_tmps = self.rco_exp(expr_body, True)
-                orelse_expr, orelse_tmp = self.rco_exp(expr_orelse, True)
 
-                wrap_body = Begin([ Assign([name], expr)for name,expr in body_tmps], body)
-                wrap_orelse = Begin([Assign([name], expr) for name, expr in orelse_tmp], orelse_expr)
-                return_expr = IfExp(test_expr, wrap_body, wrap_orelse)
+                # TODO does this need atom?
+                test_expr, test_tmps = self.rco_exp(expr_test, False)
+                body, body_tmps = self.rco_exp(expr_body, False)
+                orelse_expr, orelse_tmp = self.rco_exp(expr_orelse, False)
+
+                # 如果这里不这个name
+                if body_tmps:
+                    body = Begin([ Assign([name], expr)for name,expr in body_tmps], body)
+                if orelse_tmp:
+                    orelse_expr = Begin([Assign([name], expr) for name, expr in orelse_tmp], orelse_expr)
+                return_expr = IfExp(test_expr, body, orelse_expr)
                 if need_atomic:
                     tmp = Name(generate_name("tmp"))
                     test_tmps.append((tmp, return_expr))
@@ -1842,18 +1847,29 @@ class Compiler:
                          basic_blocks: Dict[str, List[stmt]]) -> List[stmt]:
         match rhs:
             case IfExp(test, body, orelse):
+                # breakpoint()
+                # if lhs == Name("tmp.49"):
+                #     breakpoint()
                 goto_cont = create_block(cont, basic_blocks)
                 body_list = self.explicate_assign(body, lhs, [goto_cont], basic_blocks)
                 orelse_list = self.explicate_assign(orelse, lhs, [goto_cont], basic_blocks)
                 return self.explicate_pred(test, body_list, orelse_list, basic_blocks)
 
             case Begin(body, result):
-                new_body = [Assign([lhs], result)] + cont
+                # the result may be ifExp too
+                # 为了避免太复杂。 result 这里不能是 ifExp
+                # 但其实这里类似玉  lhs = result
+                # return self.explicate_assign(rhs, lhs, cont, basic_blocks)
+
+                # new_body = [Assign([lhs], result)] + cont
+                new_body = self.explicate_assign(result, lhs, cont, basic_blocks)
+
                 for s in reversed(body):
                     # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
             case _:
+
                 return [Assign([lhs], rhs)] + cont
 
 
@@ -2061,10 +2077,78 @@ class Compiler:
         # YOUR CODE HERE
         result = []
         match s:
+            case Assign([Subscript(tu, slice, ctx)], Call(Name('make_any'), [value, Constant(tag)])):
+                tu = self.select_arg(tu)
+                slice = self.select_arg(slice)
+                result.append(Instr('movq', [tu, Reg('r11')]))
+                # Deref('r11', 8 * (slice.value + 1)) is the left
+                # result.append(Instr('movq', [value, Deref('r11', 8 * (slice.value + 1))]))
+
+                value = self.select_arg(value)
+                if tag in (1, 4):
+                    result.append(Instr('movq', [value, Deref('r11', 8 * (slice.value + 1))]))
+                    result.append(Instr('salq', [Immediate(3), Deref('r11', 8 * (slice.value + 1))]))
+                    result.append(Instr('orq', [Immediate(tag), Deref('r11', 8 * (slice.value + 1))]))
+                else:
+                    result.append(Instr('movq', [value, Deref('r11', 8 * (slice.value + 1))]))
+                    result.append(Instr('orq', [Immediate(tag), Deref('r11', 8 * (slice.value + 1))]))
+
+            case Assign([lhs], Call(Name('any_len'), [value])):
+                left = self.select_arg(lhs)
+                value = self.select_arg(value)
+                result.append(Instr('movq', [Immediate(-8), Reg("r11")]))
+                result.append(Instr('andq', [value, Reg("r11")]))
+                result.append(Instr('movq', [Deref('r11', 0), Reg('r11')]))
+                result.append(Instr('andq', [Immediate(126), Reg("r11")]))
+                result.append(Instr('sarq', [Immediate(1), Reg("r11")]))
+                result.append(Instr('movq', [ Reg("r11"), left]))
+            case Assign([lhs], Call(Name('any_tuple_load_unsafe'), [e1, e2])):
+                left = self.select_arg(lhs)
+                e1 = self.select_arg(e1)
+                e2 = self.select_arg(e2)
+                result.append(Instr('movq', [Immediate(-8), Reg("r11")]))
+                result.append(Instr('andq', [e1, Reg("r11")]))
+                result.append(Instr('movq', [e2, Reg('rax')]))
+                result.append(Instr('andq', [Immediate(1), Reg("rax")]))
+                result.append(Instr('imulq', [Immediate(8), Reg("r11")]))
+                result.append(Instr('movq', [ Deref("r11", 0), left]))
+            case Assign([lhs], Call(Name('make_any'), [value, Constant(tag)])):
+
+                left = self.select_arg(lhs)
+                value = self.select_arg(value)
+                if tag in (1, 4):
+                    result.append(Instr('movq', [value, left]))
+                    result.append(Instr('salq', [Immediate(3), left]))
+                    result.append(Instr('orq', [Immediate(tag), left]))
+                else:
+                    result.append(Instr('movq', [value, left]))
+                    result.append(Instr('orq', [Immediate(tag), left]))
+            case Assign([lhs], TagOf(e)):
+                left = self.select_arg(lhs)
+                value = self.select_arg(e)
+                result.append(Instr('movq', [value, left]))
+                result.append(Instr('andq', [Immediate(7), left]))
+            case Assign([lhs], ValueOf(e, ty)):
+                left = self.select_arg(lhs)
+                value = self.select_arg(e)
+                if isinstance(ty, IntType) or isinstance(ty, BoolType):
+                    result.append(Instr('movq', [value, left]))
+                    result.append(Instr('sarq', [Immediate(3), left]))
+                else:
+                    result.append(Instr('movq', [Immediate(-8), left]))
+                    result.append(Instr('andq', [value, left]))
+
             case Expr(Call(Name('print'), [arg])):
                 arg = self.select_arg(arg)
                 result.append(Instr('movq', [arg, Reg("rdi")]))
                 result.append(Callq(label_name("print_int"), 1))
+            case Assign([lhs], Call(Name('input_int'), [])):
+                lhs = self.select_arg(lhs)
+                result.append(Callq(label_name("read_int"), 0))
+                result.append(Instr('movq', [Reg('rax'), lhs]))
+            case Assign([lhs], Call(Name('exit'), [])):
+                # lhs = self.select_arg(lhs)
+                result.append(Callq(label_name("exit"), 0))
 
             case Expr(value):
                 # don't need do more on value
@@ -2111,13 +2195,10 @@ class Compiler:
             case Assign([Subscript(tu, slice, ctx)], value):
                 tu = self.select_arg(tu)
                 slice = self.select_arg(slice)
-                value = self.select_arg(value)
                 result.append(Instr('movq', [tu, Reg('r11')]))
+                value = self.select_arg(value)
                 result.append(Instr('movq', [value, Deref('r11', 8 * (slice.value + 1))]))
-            case Assign([lhs], Call(Name('input_int'), [])):
-                lhs = self.select_arg(lhs)
-                result.append(Callq(label_name("read_int"), 0))
-                result.append(Instr('movq', [Reg('rax'), lhs]))
+
             case Assign([lhs], Call(fun, args)):
                 # breakpoint()
                 lhs = self.select_arg(lhs)
@@ -2204,6 +2285,17 @@ class Compiler:
                 result.append(Instr('movq', [Reg('r15'), Reg('rdi')]))
                 result.append(Instr('movq', [Immediate(size), Reg('rsi')]))
                 result.append(Callq(label_name("collect"), 2))
+            case Return(Call(Name('make_any'), [value, Constant(tag)])):
+
+                value = self.select_arg(value)
+                if tag in (1, 4):
+                    result.append(Instr('movq', [value, Reg('rax')]))
+                    result.append(Instr('salq', [Immediate(3), Reg('rax')]))
+                    result.append(Instr('orq', [Immediate(tag), Reg('rax')]))
+                else:
+                    result.append(Instr('movq', [value, Reg('rax')]))
+                    result.append(Instr('orq', [Immediate(tag), Reg('rax')]))
+                result.append(Jump(self.tmp_concluation))
             case Return(value):
                 value = self.select_arg(value)
                 result.append(Instr('movq', [value, Reg('rax')]))

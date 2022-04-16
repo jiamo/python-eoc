@@ -10,7 +10,7 @@ class InterpCfun(InterpCtup):
         case Function(name, xs, blocks, env):
           old_blocks = self.blocks
           self.blocks = blocks
-          # trace('apply_fun ' + name)
+          trace('apply_fun ' + name)
           # trace(blocks.keys())
           new_env = {x: v for (x,v) in env.items()}
           for (x,arg) in zip(xs, args):

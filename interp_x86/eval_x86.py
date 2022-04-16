@@ -170,6 +170,9 @@ class X86Emulator:
             return self.variables[str(a.children[0])]
         elif a.data == 'int_a':
             return self.eval_imm(a.children[0])
+        elif a.data == 'neg_a':
+            # breakpoint()
+            return self.eval_imm(a)
         elif a.data == 'mem_a':
             offset, reg = a.children
             addr = self.registers[reg]
@@ -236,6 +239,7 @@ class X86Emulator:
     def eval_instrs(self, instrs, blocks, output):
         for instr in instrs:
             self.log(f'Evaluating instruction: {instr.pretty()}')
+            trace(f'Evaluating instruction: {instr.pretty()}')
             if instr.data == 'pushq':
                 a = instr.children[0]
                 self.registers['rsp'] = self.registers['rsp'] - 8
@@ -271,11 +275,23 @@ class X86Emulator:
                 v2 = self.eval_arg(a2)
                 self.store_arg(a2, v2 - v1)
 
+            elif instr.data == 'orq':
+                a1, a2 = instr.children
+                v1 = self.eval_arg(a1)
+                v2 = self.eval_arg(a2)
+                self.store_arg(a2, v1 | v2)
+
             elif instr.data == 'xorq':
                 a1, a2 = instr.children
                 v1 = self.eval_arg(a1)
                 v2 = self.eval_arg(a2)
                 self.store_arg(a2, v1 ^ v2)
+
+            elif instr.data == 'andq':
+                a1, a2 = instr.children
+                v1 = self.eval_arg(a1)
+                v2 = self.eval_arg(a2)
+                self.store_arg(a2, v1 & v2)
 
             elif instr.data == 'negq':
                 a1 = instr.children[0]
@@ -341,7 +357,10 @@ class X86Emulator:
                     output.append(self.registers['rdi'])
                     if self.logging:
                         print(self.print_state())
-
+                elif target == label_name("exit"):
+                    # should not exit here?
+                    trace("xxxxxx .exit .....")
+                    exit()
                 elif target == label_name('read_int'):
                     self.registers['rax'] = int(input())
                     self.log(f'CALL TO read_int: {self.registers["rax"]}')
@@ -391,7 +410,7 @@ class X86Emulator:
                         print(self.print_state())
 
                 else:
-                    # trace("#### {}".format(target))
+                    trace("#### {}".format(target))
                     self.eval_instrs(blocks[target], blocks, output)
 
             elif instr.data == 'retq':
@@ -401,7 +420,7 @@ class X86Emulator:
                 a1, a2 = instr.children
                 v1 = self.eval_arg(a1)
                 v2 = self.eval_arg(a2)
-
+                trace(f"cmq {v1=} {v2=} {a1=} {a2=}")
                 if v1 == v2:
                     self.registers['EFLAGS'] = 'e'
                 elif v2 < v1:
@@ -422,7 +441,7 @@ class X86Emulator:
             elif instr.data == 'indirect_callq':
                 trace("&&&& {} {}".format(instr, instr.children[0]))
                 v = self.eval_arg(instr.children[0])
-                trace('{} {}'.format(blocks.keys(), v))
+                trace('$$$$ {} {}'.format(instr.children[0], v))
 
                 assert isinstance(v, FunPointer)
                 target = v.fun_name
