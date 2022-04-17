@@ -78,7 +78,7 @@ def calculate_tag(size, ty, arith=None):
             tag[p_mask + i] = 0
     tag[1:7] = tag[1:7] | bitarray.util.int2ba(size, length=6, endian='little')
     if arith:
-        tag[58:63] = bitarray.util.int2ba(arith, length=5, endian='little')
+        tag[57:62] = bitarray.util.int2ba(arith, length=5, endian='little')
     print("tags", bitarray.util.ba2base(2, tag))
     return bitarray.util.ba2int(tag)
 
@@ -588,10 +588,11 @@ class Compiler:
                 return Inject(Lambda(params, body), FunctionType(params_types, AnyType()))
 
     def cast_insert_stmt(self, stmt):
-        # TODO 每次都要展开 stmt 能不能不展开，直接处理 子children
         match stmt:
             case Expr(Call(Name('print'), [arg])):
+                # Find bug need cast_insert_stmt for all
                 new_arg = self.cast_insert_exp(arg)
+                # new_arg = Project(new_arg, IntType())
                 return Expr(Call(Name('print'), [new_arg]))
             case Expr(value):
                 expr = self.cast_insert_exp(value)
@@ -2140,6 +2141,11 @@ class Compiler:
 
             case Expr(Call(Name('print'), [arg])):
                 arg = self.select_arg(arg)
+                # need print can be any... so need valueOf
+                # at now we thint it is int
+                # TODO how to make print can pass type check
+                result.append(Instr('sarq', [Immediate(3), arg]))
+
                 result.append(Instr('movq', [arg, Reg("rdi")]))
                 result.append(Callq(label_name("print_int"), 1))
             case Assign([lhs], Call(Name('input_int'), [])):
@@ -2149,7 +2155,12 @@ class Compiler:
             case Assign([lhs], Call(Name('exit'), [])):
                 # lhs = self.select_arg(lhs)
                 result.append(Callq(label_name("exit"), 0))
-
+            case Assign([lhs], Call(Name('arity'), [arg])):
+                lhs = self.select_arg(lhs)
+                arg = self.select_arg(arg)
+                result.append(Instr('movq', [arg, Reg("r11")]))
+                result.append(Instr('movq', [Deref('r11', 0), lhs]))
+                result.append(Instr('sarq', [Immediate(57), lhs]))
             case Expr(value):
                 # don't need do more on value
                 result.append(Instr('movq', [value, Reg("rax")]))
@@ -2662,7 +2673,7 @@ class Compiler:
 
     def allocate_registers(self, p: X86Program) -> X86Program:
         # YOUR CODE HERE
-
+        # exit()
         # breakpoint()
         # ? RDI
 

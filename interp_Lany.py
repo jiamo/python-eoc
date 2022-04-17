@@ -120,6 +120,7 @@ class InterpLany(InterpLlambda):
         n = self.interp_exp(index, env)
         if isinstance(t, Tagged):
           t = t.value
+        # 不能轻易的添加 原来不应该出现的value
         trace(f"$$$$$$$$$$ {tup=} {t=} ; {index=} {n=} ")
         return t[n]
       case AnnLambda(params, returns, body):

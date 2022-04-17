@@ -254,8 +254,9 @@ class X86Emulator:
 
             elif instr.data == 'movq':
                 a1, a2 = instr.children
-                # trace("trace {} {} {}".format(instr, a1, a2))
+                trace("trace {} {} {}".format(instr, a1, a2))
                 v = self.eval_arg(a1)
+                trace(" movq {} {} {} {}".format(instr, a1, a2, v))
                 self.store_arg(a2, v)
 
             elif instr.data == 'movzbq':
@@ -286,7 +287,22 @@ class X86Emulator:
                 v1 = self.eval_arg(a1)
                 v2 = self.eval_arg(a2)
                 self.store_arg(a2, v1 ^ v2)
-
+            elif instr.data == 'sarq':
+                a1, a2 = instr.children
+                v1 = self.eval_arg(a1)
+                v2 = self.eval_arg(a2)
+                # return val>>n if val >= 0 else (val+1<<64)>>n
+                # while TODO python tag just using it is > 9
+                trace(f"...... {v2=} {v1=} {a1=} {a2=}")
+                self.store_arg(a2, v2 >> v1)
+            elif instr.data == 'salq':
+                a1, a2 = instr.children
+                v1 = self.eval_arg(a1)
+                v2 = self.eval_arg(a2)
+                # return val>>n if val >= 0 else (val+1<<64)>>n
+                # while TODO python tag just using it is > 9
+                trace(f"...... {v2=} {v1=} {a1=} {a2=}")
+                self.store_arg(a2, v2 << v1)
             elif instr.data == 'andq':
                 a1, a2 = instr.children
                 v1 = self.eval_arg(a1)
