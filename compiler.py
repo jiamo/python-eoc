@@ -1857,9 +1857,6 @@ class Compiler:
                 return self.explicate_pred(test, body_list, orelse_list, basic_blocks)
 
             case Begin(body, result):
-                # the result may be ifExp too
-                # 为了避免太复杂。 result 这里不能是 ifExp
-                # 但其实这里类似玉  lhs = result
                 # return self.explicate_assign(rhs, lhs, cont, basic_blocks)
 
                 # new_body = [Assign([lhs], result)] + cont

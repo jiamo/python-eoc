@@ -43,6 +43,27 @@ op_dict = {
     "!=": "ne",
 }
 
+"""
+tagof (IntType()) = 001   1 
+tagof (BoolType()) = 100   4
+tagof (TupleType(ts)) = 010  2
+tagof (FunctionType(ps, rt))= 011 3  
+tagof (type(None)) = 101  5
+"""
+
+def tagof(ty):
+    match ty:
+        case IntType():
+            return 1
+        case BoolType():
+            return 4
+        case TupleType(ts):
+            return 2
+        case FunctionType(ps, rt):
+            return 3
+        case _:
+            return 5
+
 
 def calculate_tag(size, ty, arith=None):
     tag = bitarray.bitarray(64, endian="little")
@@ -57,7 +78,7 @@ def calculate_tag(size, ty, arith=None):
             tag[p_mask + i] = 0
     tag[1:7] = tag[1:7] | bitarray.util.int2ba(size, length=6, endian='little')
     if arith:
-        tag[58:63] = bitarray.util.int2ba(arith, length=5, endian='little')
+        tag[57:62] = bitarray.util.int2ba(arith, length=5, endian='little')
     print("tags", bitarray.util.ba2base(2, tag))
     return bitarray.util.ba2int(tag)
 
@@ -401,17 +422,34 @@ class Compiler:
             case _:
                 return set()
 
-    def free_in_exp(self, bindings, e):
-        match e:
+    def free_in_stmt(self, bindings, s):
+        match s:
+            case Assign([Name(l)], value):
+                # nolocal
+                # 这里 如果是赋值 也是内部变量
+                # 不需要逃逸成参数
+                bindings.append(l)
+                return self.free_in_exp(bindings, value)
+            case _:
+                return set()
 
+    def free_in_exp(self, bindings, e):
+        # 查找 free_in_exp
+        match e:
             case Name(id):
-                # print(".... ", sym_map)
+                print("free_in_exp .... ", id, bindings)
                 if id in bindings:
                     return set()
                 else:
                     # breakpoint()
                     self.name_type_dict[id] = e.has_type
                     return {id}
+            case TagOf(value):
+                return set()
+            case ValueOf(value, t):
+                return self.free_in_exp(bindings, value)
+            case Constant(value):
+                return set()
             case BinOp(left, op, right):
                 l = self.free_in_exp(bindings, left)
                 r = self.free_in_exp(bindings, right)
@@ -442,21 +480,37 @@ class Compiler:
             case Lambda(params, body):
                 # lambda params have not type
                 return self.free_in_exp(params | bindings, body)
+            case Call(name, args):
+                return set().union(*[self.free_in_exp(bindings, i) for i in args])
+            case Begin(stmts, expr):
+                r = [self.free_in_stmt(bindings, i) for i in stmts] + [self.free_in_exp(bindings, expr)]
+                return set().union(*r)
             case _:
-                return set()
+                raise Exception('free_in_exp: unexpected ' + repr(e))
 
     def free_in_lambda_stmt(self, stmt):
         # lambda can be in any stmt
+        # print(stmt)
+        # breakpoint()
         match stmt:
             # 先假定这个是 只有 lambda
             case AnnAssign(Name(name), typ, Lambda(params, body), simple):
                 # var not in params are free in bdoy
                 # breakpoint()
                 params_types = typ.param_types
-                for i,j in zip(params, params_types):
+                for i, j in zip(params, params_types):
                     # breakpoint()
                     self.name_type_dict[i] = j  # name have be unify
                 return self.free_in_exp(params, body)
+            case Assign([Name(x)], Call(Name('make_any'), [AnnLambda(params, returns, body), tag])):
+                # breakpoint()
+                for p in params:
+                    self.name_type_dict[p[0]] = p[1]
+                    # breakpoint()
+                self.name_type_dict[x] = stmt.targets[0].has_type
+                bindings = [i[0] for i in params]
+                print("binding ", bindings)
+                return self.free_in_exp(bindings, body)
             case Assign([Name(x)], value):
                 # breakpoint()
                 self.name_type_dict[x] = stmt.targets[0].has_type
@@ -534,10 +588,11 @@ class Compiler:
                 return Inject(Lambda(params, body), FunctionType(params_types, AnyType()))
 
     def cast_insert_stmt(self, stmt):
-        # TODO 每次都要展开 stmt 能不能不展开，直接处理 子children
         match stmt:
             case Expr(Call(Name('print'), [arg])):
+                # Find bug need cast_insert_stmt for all
                 new_arg = self.cast_insert_exp(arg)
+                # new_arg = Project(new_arg, IntType())
                 return Expr(Call(Name('print'), [new_arg]))
             case Expr(value):
                 expr = self.cast_insert_exp(value)
@@ -602,14 +657,14 @@ class Compiler:
                         tmp = Name(generate_name("tmp"))
                         e = self.reveal_casts_exp(e)
                         return Begin([Assign([tmp], e)],
-                                     IfExp(Compare(TagOf(tmp), [Eq()], [Constant(TagOf(ftype))]),
+                                     IfExp(Compare(TagOf(tmp), [Eq()], [Constant(tagof(ftype))]),
                                            ValueOf(tmp, ftype),
                                            Call(Name('exit'), [])))
                     case TupleType(t):
                         tmp = Name(generate_name("tmp"))
                         e = self.reveal_casts_exp(e)
                         return Begin([Assign([tmp], e)],
-                                     IfExp(Compare(TagOf(tmp), [Eq()], [Constant(TagOf(ftype))]),
+                                     IfExp(Compare(TagOf(tmp), [Eq()], [Constant(tagof(ftype))]),
                                            IfExp(
                                                Compare(
                                                    Call(Name('len'), [ValueOf(tmp, ftype)]),
@@ -622,7 +677,7 @@ class Compiler:
                         tmp = Name(generate_name("tmp"))
                         e = self.reveal_casts_exp(e)
                         return Begin([Assign([tmp], e)],
-                                     IfExp(Compare(TagOf(tmp), [Eq()], [Constant(TagOf(ftype))]),
+                                     IfExp(Compare(TagOf(tmp), [Eq()], [Constant(tagof(ftype))]),
                                            IfExp(Compare(Call(Name('arity'), [ValueOf(tmp, ftype)]), [Eq()],
                                                          [Constant(len(args))]),
                                                   ValueOf(tmp, ftype),
@@ -631,7 +686,7 @@ class Compiler:
             case Inject(x, ftype):
                 # breakpoint()
                 x = self.reveal_casts_exp(x)
-                return Call(Name('make_any'), [x, Constant(TagOf(ftype))])
+                return Call(Name('make_any'), [x, Constant(tagof(ftype))])
             case FunRef(name, airth):
                 return e
             case Call(Name('any_tuple_load'), [e1,e2]):
@@ -684,6 +739,7 @@ class Compiler:
             case Lambda(params, body):
                 # The real type is knowing.....?
                 params = [(x, AnyType()) for x in params]
+                # breakpoint()
                 body = self.reveal_casts_exp(body)
                 return AnnLambda(params, AnyType(), body)
             case _:
@@ -809,6 +865,7 @@ class Compiler:
                 return Lambda(params, body)
             case AnnLambda(params, returns, body):
                 # lambda params have not type
+                # breakpoint()
                 body = self.convert_assignments_exp(body)
                 return AnnLambda(params, returns, body)
             case _:
@@ -872,10 +929,13 @@ class Compiler:
                             for s in stmts:
                                 s_assign_vars = self.assigned_vars_stmt(s)
                                 s_lambda_free_vars = self.free_in_lambda_stmt(s)
+                                # breakpoint()
                                 assigned_vars = assigned_vars.union(s_assign_vars)
                                 lambda_free_variables = lambda_free_variables.union(s_lambda_free_vars)
 
                             box_names = assigned_vars.intersection(lambda_free_variables)
+                            # if x  == "g":
+                            #     breakpoint()
                             # if x == "main":
                             #     breakpoint()
                             init_box = []
@@ -888,18 +948,40 @@ class Compiler:
                                     # todo we don't infer the type of name
                                     init_box.append(Assign([Name(box_name)], Tuple([Uninitialized(self.name_type_dict[name])], Load())))
                                 self.box_dict[name] = box_name
+
                             stmts = [self.convert_assignments_stmt(i) for i in stmts]
                             # returns = None  # need the lambda typ
                             result.append(FunctionDef(x, args, init_box + stmts, dl, returns, comment))
             case _:
                 raise Exception('convert_assignments: unexpected ' + repr(p))
         # breakpoint()
-        trace(result)
-        return Module(result)
+        # trace(result)
+        r = Module(result)
+        trace(r)
+        return r
 
     def convert_to_closures_exp(self, e):
         match e:
             # case Call(Name('input_int'), []):
+            case Call(Name(x), cargs) if x == 'make_any' and isinstance(cargs[0], AnnLambda):
+                # breakpoint()
+                f = self.convert_to_closures_exp(cargs[0])
+
+                r = Call(Name(x), [f, Constant(tagof(f.closure_type))])
+                r.my_extra_type = f.closure_type
+                return r
+            case Call(Name(x), cargs) if x == 'make_any' and isinstance(cargs[0], FunRef):
+                # breakpoint()
+                f = self.convert_to_closures_exp(cargs[0])
+                if cargs[0].name in self.func_real_types:
+                    closure_type = self.func_real_types[cargs[0].name]
+                    new_tag_type = Constant(tagof(closure_type))
+                else:
+                    closure_type = None
+                    new_tag_type = self.convert_to_closures_exp(cargs[1])
+                r = Call(Name(x), [f, new_tag_type])
+                r.my_extra_type = closure_type  # type 需要传递
+                return r
             case Call(Name(x), args):
                 args = [self.convert_to_closures_exp(i) for i in args]
                 return Call(Name(x), args)
@@ -916,6 +998,7 @@ class Compiler:
             case Call(x, args):
                 # breakpoint()
                 args = [self.convert_to_closures_exp(i) for i in args]
+                # breakpoint()
                 c = self.convert_to_closures_exp(x)
                 tmp = generate_name("clos")
                 return Begin(
@@ -931,9 +1014,23 @@ class Compiler:
                 return TagOf(value)
             case ValueOf(value, typ):
                 value = self.convert_to_closures_exp(value)
+                if isinstance(value, Name) and value.id in self.func_real_types:
+                    typ = self.func_real_types[value.id]
                 return ValueOf(value, typ)
             case Constant(v):
+                # we need change callable to
+                # match v:
+                #     case TagOf(FunctionType(args_types, AnyType())):
+                #         # change to ClosureType
+                #         # how can I know this function free_types is what?
+                #         # It is wrong
+                #         closureTy = TupleType(
+                #             [FunctionType(args_types, AnyType())]
+                #         )
+                #         return TagOf(closureTy)
                 return e
+
+
             case Name(id):
                 # breakpoint()
                 print("id is .... {}".format(id))
@@ -954,7 +1051,11 @@ class Compiler:
 
             case Compare(left, [cmp], [right]):
                 left = self.convert_to_closures_exp(left)
-                right = self.convert_to_closures_exp(right)
+                if isinstance(left, TagOf) and left.value.id in self.func_real_types:
+                    # breakpoint()
+                    right = Constant(tagof(self.func_real_types[left.value.id]))
+                else:
+                    right = self.convert_to_closures_exp(right)
                 return Compare(left, [cmp], [right])
 
             case IfExp(expr_test, expr_body, expr_orelse):
@@ -1007,7 +1108,10 @@ class Compiler:
                 name = generate_name('lambda')
                 n = len(params)
 
-                free_vars = list(self.free_in_exp(params, body))
+                # params have types info
+                bindings = [i[0] for i in params]
+                free_vars = list(self.free_in_exp(bindings, body))
+                # breakpoint()
                 free_named_vars = [Name(i) for i in free_vars]
                 free_types = [self.name_type_dict[i] for i in free_vars]
                 lambda_parms = []
@@ -1032,9 +1136,16 @@ class Compiler:
                 self.lambda_convert_defs.append(lambda_def)
 
                 # The return type was
-                closureTy = TupleType([FunctionType([i[1] for i in lambda_parms], returns), *free_types])
+                # but I don't know its real free_types in
+                # 好像不需要 *free_types
+                closureTy = TupleType(
+                    [FunctionType([i[1] for i in lambda_parms], returns)]
+                )
+
                 c = Closure(n, [FunRef(name, n), *free_named_vars])  # save the free_named_vars into the cloure
+                # breakpoint()
                 c.closure_type = closureTy
+                self.func_real_types[name] = closureTy
                 return c
             case Uninitialized(ty):
                 return e
@@ -1053,6 +1164,12 @@ class Compiler:
                 # TODO l need do?
                 # l = self.convert_to_closures_exp(l)
                 v_expr = self.convert_to_closures_exp(value)
+                # if l == Name("tmp.9"):
+                #     # l.extra =
+                #     breakpoint()
+                if getattr(v_expr, "my_extra_type", None):
+                    # breakpoint()
+                    self.func_real_types[l.id] = v_expr.my_extra_type
                 return Assign(stmt.targets, v_expr)
             case If(test, body, orelse):
                 test_expr = self.convert_to_closures_exp(test)
@@ -1094,6 +1211,7 @@ class Compiler:
         # self.name_type_dict = {}
         self.lambda_convert_defs = []
         self.lambda_exp = {}
+        self.func_real_types = {}
         match p:
             case Module(body):
                 for s in body:
@@ -1108,23 +1226,30 @@ class Compiler:
                             # breakpoint()
                             return_value = self.find_last_stmt_return(stmts[-1])
 
+
                             if isinstance(return_value, Name) and return_value in self.lambda_exp:
                                 # pass
                                 returns = self.lambda_exp[stmts[-1].value].closure_type
+
+                            self.func_real_types[x] = TupleType([FunctionType([i[1] for i in args], returns)])
 
                             result.append(FunctionDef(x, args, stmts, dl, returns, comment))
             case _:
                 raise Exception('convert_to_closures: unexpected ' + repr(p))
         # breakpoint()
-        type_check_Lany.TypeCheckLany().type_check(p)
         result = self.lambda_convert_defs + result
         trace(result)
-        return Module(result)
+        r = Module(result)
+        trace(r)
+
+        type_check_Lany.TypeCheckLany().type_check(r)
+        return r
 
     def limit_functions_exp(self, e, func_arg_map, args_map):
         match e:
-            case Call(Name('input_int'), []):
-                return e
+            case Call(Name(x), args):
+                args = [self.limit_functions_exp(i, func_arg_map, args_map) for i in args]
+                return Call(Name(x), args)
             case Call(FunRef(name, arth), args):
                 args = [self.limit_functions_exp(i, func_arg_map, args_map) for i in args]
 
@@ -1135,6 +1260,10 @@ class Compiler:
                 else:
                     return e
             case Constant(v):
+                return e
+            case TagOf(v):
+                return e
+            case ValueOf(v, t):
                 return e
             case Name(id):
                 if id in args_map:
@@ -1188,13 +1317,13 @@ class Compiler:
                 result = self.limit_functions_exp(result, func_arg_map, args_map)
                 return Begin(stmts, result)
             case _:
-                raise Exception('limit: unexpected ' + repr(e))
+                raise Exception('limit exp: unexpected ' + repr(e))
 
     def limit_functions_stmt(self, stmt, func_args_map, args_map):
         match stmt:
-            case Expr(Call(Name('print'), [arg])):
+            case Expr(Call(Name(x), [arg])):
                 new_arg = self.limit_functions_exp(arg, func_args_map, args_map)
-                return Expr(Call(Name('print'), [new_arg]))
+                return Expr(Call(Name(x), [new_arg]))
             case Expr(value):
                 expr = self.limit_functions_exp(value, func_args_map, args_map)
                 return Expr(expr)
@@ -1378,6 +1507,10 @@ class Compiler:
                 return exp, []
             case Constant(x):
                 return exp, []
+            case TagOf(x):
+                return exp, []  # we don't have tuple in Tag
+            case ValueOf(x):
+                return exp, []
             case FunRef(x, n):
                 return exp, []
             case Begin(body, exp):
@@ -1420,9 +1553,9 @@ class Compiler:
         # result = []
         # breakpoint()
         match s:
-            case Expr(Call(Name('print'), [arg])):
+            case Expr(Call(Name(x), [arg])):
                 new_arg, stmts = self.expose_allocation_exp(arg)
-                return stmts + [Expr(Call(Name('print'), [new_arg]))]
+                return stmts + [Expr(Call(Name(x), [new_arg]))]
             case Expr(value):
                 expr, stmts = self.expose_allocation_exp(value)
                 return stmts + [Expr(expr)]
@@ -1454,7 +1587,7 @@ class Compiler:
     def expose_allocation(self, p):
         # YOUR CODE HERE
         trace(p)
-        type_check_Llambda.TypeCheckLlambda().type_check(p)
+        type_check_Lany.TypeCheckLany().type_check(p)
         result = []
         match p:
             case Module(body):
@@ -1469,7 +1602,7 @@ class Compiler:
                             result.append(FunctionDef(fun, args, new_stmts, dl, returns, comment))
                 result = Module(result)
             case _:
-                raise Exception('interp: unexpected ' + repr(p))
+                raise Exception('interp: expose_allocation unexpected ' + repr(p))
 
         # breakpoint()
         trace(result)
@@ -1526,8 +1659,25 @@ class Compiler:
                     return e, []
             case Constant(value):
                 return e, []
-            case Call(Name('input_int'), []):
-                return e, []  # beachse match e was
+            case TagOf(value):
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    # v_tmps.append()
+                    return tmp, [(tmp, e)]
+                else:
+                    return e, []
+            case ValueOf(value, ty):
+                # we think the value was must of tmp TODO may be it is not right
+                if need_atomic:
+                    tmp = Name(generate_name("tmp"))
+                    # v_tmps.append()
+                    return tmp, [(tmp, e)]
+                else:
+                    return e, []
+
+            # TODO check it is right for normal exp
+            # case Call(Name('input_int'), []):
+            #     return e, []  # beachse match e was
             case Compare(left, [cmp], [right]):
                 left_expr, left_tmps = self.rco_exp(left, True)
                 right_expr, right_tmps = self.rco_exp(right, True)
@@ -1541,13 +1691,18 @@ class Compiler:
                     return return_expr, left_tmps
 
             case IfExp(expr_test, expr_body, expr_orelse):
-                test_expr, test_tmps = self.rco_exp(expr_test, True)
-                body, body_tmps = self.rco_exp(expr_body, True)
-                orelse_expr, orelse_tmp = self.rco_exp(expr_orelse, True)
 
-                wrap_body = Begin([ Assign([name], expr)for name,expr in body_tmps], body)
-                wrap_orelse = Begin([Assign([name], expr) for name, expr in orelse_tmp], orelse_expr)
-                return_expr = IfExp(test_expr, wrap_body, wrap_orelse)
+                # TODO does this need atom?
+                test_expr, test_tmps = self.rco_exp(expr_test, False)
+                body, body_tmps = self.rco_exp(expr_body, False)
+                orelse_expr, orelse_tmp = self.rco_exp(expr_orelse, False)
+
+                # 如果这里不这个name
+                if body_tmps:
+                    body = Begin([ Assign([name], expr)for name,expr in body_tmps], body)
+                if orelse_tmp:
+                    orelse_expr = Begin([Assign([name], expr) for name, expr in orelse_tmp], orelse_expr)
+                return_expr = IfExp(test_expr, body, orelse_expr)
                 if need_atomic:
                     tmp = Name(generate_name("tmp"))
                     test_tmps.append((tmp, return_expr))
@@ -1666,7 +1821,7 @@ class Compiler:
     def remove_complex_operands(self, p: Module) -> Module:
         # YOUR CODE HERE
         trace(p)
-        type_check_Llambda.TypeCheckLlambda().type_check(p)
+        type_check_Lany.TypeCheckLany().type_check(p)
         result = []
         match p:
             case Module(body):
@@ -1684,7 +1839,7 @@ class Compiler:
                 raise Exception('interp: unexpected ' + repr(p))
 
         # breakpoint()
-        type_check_Llambda.TypeCheckLlambda().type_check(p)
+        type_check_Lany.TypeCheckLany().type_check(p)
         trace(result)
         return result
 
@@ -1693,18 +1848,26 @@ class Compiler:
                          basic_blocks: Dict[str, List[stmt]]) -> List[stmt]:
         match rhs:
             case IfExp(test, body, orelse):
+                # breakpoint()
+                # if lhs == Name("tmp.49"):
+                #     breakpoint()
                 goto_cont = create_block(cont, basic_blocks)
                 body_list = self.explicate_assign(body, lhs, [goto_cont], basic_blocks)
                 orelse_list = self.explicate_assign(orelse, lhs, [goto_cont], basic_blocks)
                 return self.explicate_pred(test, body_list, orelse_list, basic_blocks)
 
             case Begin(body, result):
-                new_body = [Assign([lhs], result)] + cont
+                # return self.explicate_assign(rhs, lhs, cont, basic_blocks)
+
+                # new_body = [Assign([lhs], result)] + cont
+                new_body = self.explicate_assign(result, lhs, cont, basic_blocks)
+
                 for s in reversed(body):
                     # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
             case _:
+
                 return [Assign([lhs], rhs)] + cont
 
 
@@ -1768,6 +1931,8 @@ class Compiler:
 
     def explicate_tail(self, exp, basic_blocks) ->  List[stmt]:
         match exp:
+            case Call(Name('make_any'), args):
+                return [Return(exp)]
             case Call(fun, args):
                 # breakpoint()
                 return [Return(TailCall(fun, args))]
@@ -1910,11 +2075,89 @@ class Compiler:
         # YOUR CODE HERE
         result = []
         match s:
+            case Assign([Subscript(tu, slice, ctx)], Call(Name('make_any'), [value, Constant(tag)])):
+                tu = self.select_arg(tu)
+                slice = self.select_arg(slice)
+                result.append(Instr('movq', [tu, Reg('r11')]))
+                # Deref('r11', 8 * (slice.value + 1)) is the left
+                # result.append(Instr('movq', [value, Deref('r11', 8 * (slice.value + 1))]))
+
+                value = self.select_arg(value)
+                if tag in (1, 4):
+                    result.append(Instr('movq', [value, Deref('r11', 8 * (slice.value + 1))]))
+                    result.append(Instr('salq', [Immediate(3), Deref('r11', 8 * (slice.value + 1))]))
+                    result.append(Instr('orq', [Immediate(tag), Deref('r11', 8 * (slice.value + 1))]))
+                else:
+                    result.append(Instr('movq', [value, Deref('r11', 8 * (slice.value + 1))]))
+                    result.append(Instr('orq', [Immediate(tag), Deref('r11', 8 * (slice.value + 1))]))
+
+            case Assign([lhs], Call(Name('any_len'), [value])):
+                left = self.select_arg(lhs)
+                value = self.select_arg(value)
+                result.append(Instr('movq', [Immediate(-8), Reg("r11")]))
+                result.append(Instr('andq', [value, Reg("r11")]))
+                result.append(Instr('movq', [Deref('r11', 0), Reg('r11')]))
+                result.append(Instr('andq', [Immediate(126), Reg("r11")]))
+                result.append(Instr('sarq', [Immediate(1), Reg("r11")]))
+                result.append(Instr('movq', [ Reg("r11"), left]))
+            case Assign([lhs], Call(Name('any_tuple_load_unsafe'), [e1, e2])):
+                left = self.select_arg(lhs)
+                e1 = self.select_arg(e1)
+                e2 = self.select_arg(e2)
+                result.append(Instr('movq', [Immediate(-8), Reg("r11")]))
+                result.append(Instr('andq', [e1, Reg("r11")]))
+                result.append(Instr('movq', [e2, Reg('rax')]))
+                result.append(Instr('andq', [Immediate(1), Reg("rax")]))
+                result.append(Instr('imulq', [Immediate(8), Reg("r11")]))
+                result.append(Instr('movq', [ Deref("r11", 0), left]))
+            case Assign([lhs], Call(Name('make_any'), [value, Constant(tag)])):
+
+                left = self.select_arg(lhs)
+                value = self.select_arg(value)
+                if tag in (1, 4):
+                    result.append(Instr('movq', [value, left]))
+                    result.append(Instr('salq', [Immediate(3), left]))
+                    result.append(Instr('orq', [Immediate(tag), left]))
+                else:
+                    result.append(Instr('movq', [value, left]))
+                    result.append(Instr('orq', [Immediate(tag), left]))
+            case Assign([lhs], TagOf(e)):
+                left = self.select_arg(lhs)
+                value = self.select_arg(e)
+                result.append(Instr('movq', [value, left]))
+                result.append(Instr('andq', [Immediate(7), left]))
+            case Assign([lhs], ValueOf(e, ty)):
+                left = self.select_arg(lhs)
+                value = self.select_arg(e)
+                if isinstance(ty, IntType) or isinstance(ty, BoolType):
+                    result.append(Instr('movq', [value, left]))
+                    result.append(Instr('sarq', [Immediate(3), left]))
+                else:
+                    result.append(Instr('movq', [Immediate(-8), left]))
+                    result.append(Instr('andq', [value, left]))
+
             case Expr(Call(Name('print'), [arg])):
                 arg = self.select_arg(arg)
+                # need print can be any... so need valueOf
+                # at now we thint it is int
+                # TODO how to make print can pass type check
+                result.append(Instr('sarq', [Immediate(3), arg]))
+
                 result.append(Instr('movq', [arg, Reg("rdi")]))
                 result.append(Callq(label_name("print_int"), 1))
-
+            case Assign([lhs], Call(Name('input_int'), [])):
+                lhs = self.select_arg(lhs)
+                result.append(Callq(label_name("read_int"), 0))
+                result.append(Instr('movq', [Reg('rax'), lhs]))
+            case Assign([lhs], Call(Name('exit'), [])):
+                # lhs = self.select_arg(lhs)
+                result.append(Callq(label_name("exit"), 0))
+            case Assign([lhs], Call(Name('arity'), [arg])):
+                lhs = self.select_arg(lhs)
+                arg = self.select_arg(arg)
+                result.append(Instr('movq', [arg, Reg("r11")]))
+                result.append(Instr('movq', [Deref('r11', 0), lhs]))
+                result.append(Instr('sarq', [Immediate(57), lhs]))
             case Expr(value):
                 # don't need do more on value
                 result.append(Instr('movq', [value, Reg("rax")]))
@@ -1960,13 +2203,10 @@ class Compiler:
             case Assign([Subscript(tu, slice, ctx)], value):
                 tu = self.select_arg(tu)
                 slice = self.select_arg(slice)
-                value = self.select_arg(value)
                 result.append(Instr('movq', [tu, Reg('r11')]))
+                value = self.select_arg(value)
                 result.append(Instr('movq', [value, Deref('r11', 8 * (slice.value + 1))]))
-            case Assign([lhs], Call(Name('input_int'), [])):
-                lhs = self.select_arg(lhs)
-                result.append(Callq(label_name("read_int"), 0))
-                result.append(Instr('movq', [Reg('rax'), lhs]))
+
             case Assign([lhs], Call(fun, args)):
                 # breakpoint()
                 lhs = self.select_arg(lhs)
@@ -2053,6 +2293,17 @@ class Compiler:
                 result.append(Instr('movq', [Reg('r15'), Reg('rdi')]))
                 result.append(Instr('movq', [Immediate(size), Reg('rsi')]))
                 result.append(Callq(label_name("collect"), 2))
+            case Return(Call(Name('make_any'), [value, Constant(tag)])):
+
+                value = self.select_arg(value)
+                if tag in (1, 4):
+                    result.append(Instr('movq', [value, Reg('rax')]))
+                    result.append(Instr('salq', [Immediate(3), Reg('rax')]))
+                    result.append(Instr('orq', [Immediate(tag), Reg('rax')]))
+                else:
+                    result.append(Instr('movq', [value, Reg('rax')]))
+                    result.append(Instr('orq', [Immediate(tag), Reg('rax')]))
+                result.append(Jump(self.tmp_concluation))
             case Return(value):
                 value = self.select_arg(value)
                 result.append(Instr('movq', [value, Reg('rax')]))
@@ -2419,7 +2670,7 @@ class Compiler:
 
     def allocate_registers(self, p: X86Program) -> X86Program:
         # YOUR CODE HERE
-
+        # exit()
         # breakpoint()
         # ? RDI
 

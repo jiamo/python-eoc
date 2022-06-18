@@ -9,3 +9,14 @@ The `runtime.c` file needs to be compiled by doing the following
 This will produce a file named `runtime.o`. The -g flag is to tell the
 compiler to produce debug information that you may need to use
 the gdb (or lldb) debugger.
+
+
+# example one chapter for one chapter
+
+    python run-tests-dyn.py tests/dyn/add.py
+    python run-tests-lambda.py tests/lambda/add.py
+    python run-tests-lambda.py tests/lambda/add1.py
+    python run-tests-lambda.py tests/lambda/add2.py
+
+# example the higher chapter should work on low test (except for dyn and lambda, they are two direction)
+    python run-tests-lambda.py tests/func/add.py
