@@ -525,6 +525,8 @@ class Compiler:
             case FunRef(name, airth):
                 args_types = [AnyType() for i in range(airth)]
                 return Inject(e, FunctionType(args_types, AnyType()))
+            case Call(Name('input_int'), args):
+                return Inject(e, IntType())
             case Call(x, args):
                 x = self.cast_insert_exp(x)
                 args = [self.cast_insert_exp(i) for i in args]
@@ -594,6 +596,11 @@ class Compiler:
                 new_arg = self.cast_insert_exp(arg)
                 # new_arg = Project(new_arg, IntType())
                 return Expr(Call(Name('print'), [new_arg]))
+            case Expr(Call(Name('input_int'), [])):
+                # Find bug need cast_insert_stmt for all
+                # new_arg = self.cast_insert_exp(arg)
+                # new_arg = Project(new_arg, IntType())
+                return stmt
             case Expr(value):
                 expr = self.cast_insert_exp(value)
                 return Expr(expr)

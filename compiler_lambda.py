@@ -318,10 +318,10 @@ class Compiler:
 
     def reveal_functions_stmt(self, stmt, func_map):
         match stmt:
-            case Expr(Call(Name('input'), [])):
+            case Expr(Call(Name('input_int'), [])):
                 # new_arg = self.reveal_functions_exp(arg, func_map)
                 # breakpoint()
-                return Expr(Call(Name('input'), []))   # may be build in function
+                return Expr(Call(Name('input_int'), []))   # may be build in function
             case Expr(Call(Name('print'), [arg])):
                 new_arg = self.reveal_functions_exp(arg, func_map)
                 return Expr(Call(Name('print'), [new_arg]))
