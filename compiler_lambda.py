@@ -360,7 +360,7 @@ class Compiler:
         # YOUR CODE HERE
         trace(p)
         result = []
-        func_map = {}
+        self.func_map = {}
         match p:
             case Module(body):
                 print(body)
@@ -370,7 +370,7 @@ class Compiler:
                         case FunctionDef(x, args, stmts, dl, returns, comment):
                             # breakpoint()
                             n = len(args.args) if isinstance(args, arguments) else len(args)
-                            func_map[x] = FunRef(x, n)
+                            self.func_map[x] = FunRef(x, n)
                             result.append(s)
             case _:
                 raise Exception('reveal_functions: unexpected ' + repr(p))
@@ -384,7 +384,7 @@ class Compiler:
                         case FunctionDef(x, args, stmts, dl, returns, comment):
                             # breakpoint()
                             result.append(
-                                FunctionDef(x, args, [self.reveal_functions_stmt(s, func_map) for s in stmts], dl, returns, comment))
+                                FunctionDef(x, args, [self.reveal_functions_stmt(s, self.func_map) for s in stmts], dl, returns, comment))
             case _:
                 raise Exception('reveal_functions: unexpected ' + repr(p))
         # breakpoint()
@@ -633,8 +633,6 @@ class Compiler:
                         [Assign([Name(tmp)], c)],
                         Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
                     )
-
-
             case Constant(v):
                 return e
             case Name(id):
@@ -642,6 +640,12 @@ class Compiler:
                 # TODO we need change it  Closure(n, [FunRef(name, n)])
                 # print(".... ", sym_map)
                 if id not in self.box_dict:
+                    if id in self.top_funs:
+                        # pass
+                        funref = self.func_map[id]
+                        return Closure(funref.arity, [funref])
+                        # ...
+                    #breakpoint()
                     return e
                 else:
                     # breakpoint()
@@ -1217,8 +1221,8 @@ class Compiler:
                     return e, []
             case Constant(value):
                 return e, []
-            case Call(Name('input_int'), []):
-                return e, []  # beachse match e was
+            # case Call(Name('input_int'), []):
+            #     return e, []  # beachse match e was
             case Compare(left, [cmp], [right]):
                 left_expr, left_tmps = self.rco_exp(left, True)
                 right_expr, right_tmps = self.rco_exp(right, True)
@@ -1648,7 +1652,16 @@ class Compiler:
                     result.append(Instr('movq', [arg, lhs]))
                     result.append(Instr('negq', [lhs]))
             # TODO add a call Name('arith')
+            case Assign([Subscript(tu, slice, ctx)], Call(Name('input_int'), [])):
+                # TODO select_args need instr too
+                tu = self.select_arg(tu)
+                slice = self.select_arg(slice)
+                # value = self.select_arg(value)
+                result.append(Callq(label_name("read_int"), 0))
+                result.append(Instr('movq', [tu, Reg('r11')]))
+                result.append(Instr('movq', [Reg('rax'), Deref('r11', 8 * (slice.value + 1))]))
             case Assign([Subscript(tu, slice, ctx)], value):
+                # TODO select_args need instr too
                 tu = self.select_arg(tu)
                 slice = self.select_arg(slice)
                 value = self.select_arg(value)
