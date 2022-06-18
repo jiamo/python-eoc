@@ -382,7 +382,7 @@ class Compiler:
         # YOUR CODE HERE
         trace(p)
         result = []
-        func_map = {}
+        self.func_map = {}
         match p:
             case Module(body):
                 print(body)
@@ -392,7 +392,7 @@ class Compiler:
                         case FunctionDef(x, args, stmts, dl, returns, comment):
                             # breakpoint()
                             n = len(args.args) if isinstance(args, arguments) else len(args)
-                            func_map[x] = FunRef(x, n)
+                            self.func_map[x] = FunRef(x, n)
                             result.append(s)
             case _:
                 raise Exception('reveal_functions: unexpected ' + repr(p))
@@ -406,7 +406,7 @@ class Compiler:
                         case FunctionDef(x, args, stmts, dl, returns, comment):
                             # breakpoint()
                             result.append(
-                                FunctionDef(x, args, [self.reveal_functions_stmt(s, func_map) for s in stmts], dl, returns, comment))
+                                FunctionDef(x, args, [self.reveal_functions_stmt(s, self.func_map) for s in stmts], dl, returns, comment))
             case _:
                 raise Exception('reveal_functions: unexpected ' + repr(p))
         # breakpoint()
@@ -973,18 +973,23 @@ class Compiler:
             case Call(Name(x), cargs) if x == 'make_any' and isinstance(cargs[0], FunRef):
                 # breakpoint()
                 f = self.convert_to_closures_exp(cargs[0])
-                if cargs[0].name in self.func_real_types:
-                    closure_type = self.func_real_types[cargs[0].name]
+                if cargs[0].name in self.func_val_real_types:
+                    closure_type = self.func_val_real_types[cargs[0].name]
                     new_tag_type = Constant(tagof(closure_type))
                 else:
                     closure_type = None
                     new_tag_type = self.convert_to_closures_exp(cargs[1])
                 r = Call(Name(x), [f, new_tag_type])
+                print("make_any  FunRef", cargs,  closure_type)
                 r.my_extra_type = closure_type  # type 需要传递
                 return r
             case Call(Name(x), args):
                 args = [self.convert_to_closures_exp(i) for i in args]
-                return Call(Name(x), args)
+                # breakpoint()
+                ne = Call(Name(x), args)
+                if x == 'make_any':
+                    ne.my_extra_type = AnyType()
+                return ne
             case FunRef(name, n):
                 # c = Closure(n, [FunRef(name, n)])
                 # print("... name is {}".format(name))
@@ -998,25 +1003,50 @@ class Compiler:
             case Call(x, args):
                 # breakpoint()
                 args = [self.convert_to_closures_exp(i) for i in args]
-                # breakpoint()
+
                 c = self.convert_to_closures_exp(x)
                 tmp = generate_name("clos")
-                return Begin(
+                # breakpoint()
+                 # after call the value type should be update as the call return type
+                ne = Begin(
                     [Assign([Name(tmp)], c)],
                     Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
                 )
+                # breakpoint()
+                # now c.my_extra_type must be tuple
+                # if isinstance(c.my_extra_type, AnyType):
+                #     breakpoint()
+                if isinstance(c.my_extra_type, AnyType):
+
+
+                    # breakpoint()
+                    ne.my_extra_type = AnyType()
+                else:
+                    # breakpoint()
+                    print("calling ", tmp, c.my_extra_type.types[0].ret_type )
+                    ne.my_extra_type = c.my_extra_type.types[0].ret_type  # x's  my_extra_type is not x()'s my_extra_type
+                return ne
             case Begin(stmts, exp):
                 stmts = [self.convert_to_closures_stmt(i) for i in stmts]
                 exp = self.convert_to_closures_exp(exp)
-                return Begin(stmts, exp)
+                ne = Begin(stmts, exp)
+                ne.my_extra_type = exp.my_extra_type
+                return ne
             case TagOf(value):
                 value = self.convert_to_closures_exp(value)
                 return TagOf(value)
+
             case ValueOf(value, typ):
                 value = self.convert_to_closures_exp(value)
-                if isinstance(value, Name) and value.id in self.func_real_types:
-                    typ = self.func_real_types[value.id]
-                return ValueOf(value, typ)
+                if isinstance(value, Name) and value.id in self.func_val_real_types:
+                    typ = self.func_val_real_types[value.id]
+
+
+                print("ValueOf ", value, value.my_extra_type)
+                ne = ValueOf(value, value.my_extra_type)
+                ne.my_extra_type = value.my_extra_type
+                return ne
+
             case Constant(v):
                 # we need change callable to
                 # match v:
@@ -1033,8 +1063,11 @@ class Compiler:
 
             case Name(id):
                 # breakpoint()
+                e.my_extra_type = self.func_val_real_types[id]
                 print("id is .... {}".format(id))
+
                 if id not in self.box_dict:
+                    # breakpoint()
                     return e
                 else:
                     return Subscript(Name(self.box_dict[id]), Constant(0), Load())
@@ -1051,9 +1084,9 @@ class Compiler:
 
             case Compare(left, [cmp], [right]):
                 left = self.convert_to_closures_exp(left)
-                if isinstance(left, TagOf) and left.value.id in self.func_real_types:
+                if isinstance(left, TagOf) and left.value.id in self.func_val_real_types:
                     # breakpoint()
-                    right = Constant(tagof(self.func_real_types[left.value.id]))
+                    right = Constant(tagof(self.func_val_real_types[left.value.id]))
                 else:
                     right = self.convert_to_closures_exp(right)
                 return Compare(left, [cmp], [right])
@@ -1061,8 +1094,12 @@ class Compiler:
             case IfExp(expr_test, expr_body, expr_orelse):
                 t = self.convert_to_closures_exp(expr_test)
                 b = self.convert_to_closures_exp(expr_body)
-                e = self.convert_to_closures_exp(expr_orelse)
-                return IfExp(t, b, e)
+                else_ = self.convert_to_closures_exp(expr_orelse)
+
+                # at now just use the expr_body type
+                ne = IfExp(t, b, else_)
+                ne.my_extra_type = b.my_extra_type
+                return ne
             case Subscript(value, slice, ctx):
                 v = self.convert_to_closures_exp(value)
                 s = self.convert_to_closures_exp(slice)
@@ -1070,7 +1107,10 @@ class Compiler:
             case Tuple(exprs, ctx):
                 # breakpoint()
                 exprs = [self.convert_to_closures_exp(i) for i in exprs]
-                return Tuple(exprs, ctx)
+
+                ne = Tuple(exprs, ctx)
+                ne.my_extra_type = TupleType([i.my_extra_type for i in exprs])
+                return ne
                 # return Subscript(new_value, slice, ctx)
             case Lambda(params, body):
                 name = generate_name('lambda')
@@ -1103,6 +1143,7 @@ class Compiler:
                 closureTy = TupleType([FunctionType([i[1] for i in lambda_parms], returns), *free_types])
                 c = Closure(n, [FunRef(name, n), *free_named_vars])  # save the free_named_vars into the cloure
                 c.closure_type = closureTy
+                c.my_extra_type = closureTy
                 return c
             case AnnLambda(params, returns, body):
                 name = generate_name('lambda')
@@ -1144,8 +1185,10 @@ class Compiler:
 
                 c = Closure(n, [FunRef(name, n), *free_named_vars])  # save the free_named_vars into the cloure
                 # breakpoint()
+                c.my_extra_type = closureTy
                 c.closure_type = closureTy
-                self.func_real_types[name] = closureTy
+                self.func_val_real_types[name] = closureTy
+
                 return c
             case Uninitialized(ty):
                 return e
@@ -1163,13 +1206,14 @@ class Compiler:
             case Assign([l], value):
                 # TODO l need do?
                 # l = self.convert_to_closures_exp(l)
+
                 v_expr = self.convert_to_closures_exp(value)
-                # if l == Name("tmp.9"):
-                #     # l.extra =
+                # if isinstance(v_expr, Tuple):
                 #     breakpoint()
-                if getattr(v_expr, "my_extra_type", None):
-                    # breakpoint()
-                    self.func_real_types[l.id] = v_expr.my_extra_type
+                # Subscript single type don't need to be check
+                if not isinstance(l, Subscript):
+                    self.func_val_real_types[l.id] = v_expr.my_extra_type
+
                 return Assign(stmt.targets, v_expr)
             case If(test, body, orelse):
                 test_expr = self.convert_to_closures_exp(test)
@@ -1211,7 +1255,7 @@ class Compiler:
         # self.name_type_dict = {}
         self.lambda_convert_defs = []
         self.lambda_exp = {}
-        self.func_real_types = {}
+        self.func_val_real_types = {}
         match p:
             case Module(body):
                 for s in body:
@@ -1219,6 +1263,9 @@ class Compiler:
                         case FunctionDef(x, args, stmts, dl, returns, comment):
                             # breakpoint()
                             # detect need add a new function?
+                            for i,t in args:
+                                # breakpoint()
+                                self.func_val_real_types[i] = t
                             stmts = [self.convert_to_closures_stmt(i) for i in stmts]
                             if x != "main":
                                 tmp = generate_name('fvs')
@@ -1227,13 +1274,21 @@ class Compiler:
                             return_value = self.find_last_stmt_return(stmts[-1])
 
 
-                            if isinstance(return_value, Name) and return_value in self.lambda_exp:
-                                # pass
-                                returns = self.lambda_exp[stmts[-1].value].closure_type
+                            # if isinstance(return_value, Name) and return_value in self.lambda_exp:
+                            #     # pass
+                            #     returns = self.lambda_exp[stmts[-1].value].closure_type
+                            # change to my_extra_type
 
-                            self.func_real_types[x] = TupleType([FunctionType([i[1] for i in args], returns)])
+                            # breakpoint()
+                            returns = return_value.my_extra_type
 
-                            result.append(FunctionDef(x, args, stmts, dl, returns, comment))
+                            # we keep real type in here
+
+                            self.func_val_real_types[x] = TupleType([FunctionType([i[1] for i in args], returns)])
+
+
+                            # but return still return Any?????
+                            result.append(FunctionDef(x, args, stmts, dl, AnyType(), comment))
             case _:
                 raise Exception('convert_to_closures: unexpected ' + repr(p))
         # breakpoint()
@@ -1241,8 +1296,9 @@ class Compiler:
         trace(result)
         r = Module(result)
         trace(r)
-
+        # breakpoint()
         type_check_Lany.TypeCheckLany().type_check(r)
+        # sys.exit()
         return r
 
     def limit_functions_exp(self, e, func_arg_map, args_map):

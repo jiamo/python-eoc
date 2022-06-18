@@ -810,8 +810,11 @@ class Compiler:
         # breakpoint()
         type_check_Llambda.TypeCheckLlambda().type_check(p)
         result = self.lambda_convert_defs + result
-        trace(result)
-        return Module(result)
+
+        r = Module(result)
+        trace(r)
+        sys.exit()
+        return r
 
 
     # 改函数和参数一起
