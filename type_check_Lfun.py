@@ -10,6 +10,8 @@ class TypeCheckLfun(TypeCheckLtup):
     if t1 == Bottom() or t2 == Bottom():
       return
     match t1:
+      case AnyType():
+        return
       case FunctionType(ps1, rt1):
         match t2:
           case FunctionType(ps2, rt2):
@@ -17,6 +19,9 @@ class TypeCheckLfun(TypeCheckLtup):
               self.check_type_equal(p1, p2, e)
               self.check_type_equal(rt1, rt2, e)
           case _:
+            if isinstance(t2, AnyType):
+              # t2 was AnyType we can match any
+              return
             raise Exception('error: ' + repr(t1) + ' != ' + repr(t2) \
                             + ' in ' + repr(e))
       case _:

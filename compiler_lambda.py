@@ -56,7 +56,7 @@ def calculate_tag(size, ty, arith=None):
     tag[1:7] = tag[1:7] | bitarray.util.int2ba(size, length=6, endian='little')
     if arith:
         tag[58:63] = bitarray.util.int2ba(arith, length=5, endian='little')
-    print("tags", bitarray.util.ba2base(2, tag))
+    # print("tags", bitarray.util.ba2base(2, tag))
     return bitarray.util.ba2int(tag)
 
 class Compiler:
@@ -644,8 +644,7 @@ class Compiler:
                         # pass
                         funref = self.func_map[id]
                         return Closure(funref.arity, [funref])
-                        # ...
-                    #breakpoint()
+
                     return e
                 else:
                     # breakpoint()
@@ -1424,7 +1423,7 @@ class Compiler:
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
             case _:
-                print("......", e)
+
                 return [] + cont
 
     def explicate_pred(self, cnd: expr, thn: List[stmt], els: List[stmt],
@@ -1603,6 +1602,8 @@ class Compiler:
                     Jump(else_label)
                     # Instr('jmp', [else_label])
                 ]
+            case _:
+                raise Exception("no match {} ".format(expr))
 
     def select_stmt(self, s: stmt) -> List[instr]:
         # YOUR CODE HERE
@@ -2006,12 +2007,12 @@ class Compiler:
         worklist = deque(G.vertices())
         debug = {}
         while worklist:
-            print(worklist)
+            # print(worklist)
             node = worklist.pop()
             inputs = [mapping[v] for v in trans_G.adjacent(node)]
             input = reduce(join, inputs, bottom)
             output = transfer(node, input)
-            print("node", node, "input", input, "output", output)
+            # print("node", node, "input", input, "output", output)
             if output != mapping[node]:
                 worklist.extend(G.adjacent(node))
                 mapping[node] = output
@@ -2046,7 +2047,7 @@ class Compiler:
         #     live_before_block[label] = tmp[ss[0]]
         #     live_after.update(tmp)
 
-        print("live_after ", self.live_after)
+        # print("live_after ", self.live_after)
         for label, ss in blocks.items():
             for s in ss:
                 match (s):
@@ -2112,7 +2113,7 @@ class Compiler:
             # print("handing", u)
 
             adj_colors = {color_map[v] for v in interference_graph.adjacent(u) if v in color_map}
-            print(u, adj_colors)
+            # print(u, adj_colors)
             if left_color := set(valid_colors) - adj_colors:
                 color = min(left_color)
                 if u not in color_map:
@@ -2167,8 +2168,7 @@ class Compiler:
                     new_blocks = {}
                     color_map = self.color_graph(blocks)
 
-
-                    print("color_map", color_map)
+                    # print("color_map", color_map)
                     so_far_rbp = 0
                     so_far_r15 = 0
                     cdef.rbp_spill = set()
@@ -2198,7 +2198,7 @@ class Compiler:
                         print("r15 and rbp have somecolor", )
                         sys.exit(-1)
 
-                    print("real_color_map", cdef.real_color_map)
+                    # print("real_color_map", cdef.real_color_map)
 
                     for label, ss in blocks.items():
                         ss = blocks[label]

@@ -238,8 +238,8 @@ class X86Emulator:
 
     def eval_instrs(self, instrs, blocks, output):
         for instr in instrs:
-            self.log(f'Evaluating instruction: {instr.pretty()}')
-            trace(f'Evaluating instruction: {instr.pretty()}')
+            # self.log(f'Evaluating instruction: {instr.pretty()}')
+            # trace(f'Evaluating instruction: {instr.pretty()}')
             if instr.data == 'pushq':
                 a = instr.children[0]
                 self.registers['rsp'] = self.registers['rsp'] - 8
@@ -254,9 +254,9 @@ class X86Emulator:
 
             elif instr.data == 'movq':
                 a1, a2 = instr.children
-                trace("trace {} {} {}".format(instr, a1, a2))
+                # trace("trace {} {} {}".format(instr, a1, a2))
                 v = self.eval_arg(a1)
-                trace(" movq {} {} {} {}".format(instr, a1, a2, v))
+                # trace(" movq {} {} {} {}".format(instr, a1, a2, v))
                 self.store_arg(a2, v)
 
             elif instr.data == 'movzbq':
@@ -293,7 +293,7 @@ class X86Emulator:
                 v2 = self.eval_arg(a2)
                 # return val>>n if val >= 0 else (val+1<<64)>>n
                 # while TODO python tag just using it is > 9
-                trace(f"...... {v2=} {v1=} {a1=} {a2=}")
+                # trace(f"...... {v2=} {v1=} {a1=} {a2=}")
                 self.store_arg(a2, v2 >> v1)
             elif instr.data == 'salq':
                 a1, a2 = instr.children
@@ -301,7 +301,7 @@ class X86Emulator:
                 v2 = self.eval_arg(a2)
                 # return val>>n if val >= 0 else (val+1<<64)>>n
                 # while TODO python tag just using it is > 9
-                trace(f"...... {v2=} {v1=} {a1=} {a2=}")
+                # trace(f"...... {v2=} {v1=} {a1=} {a2=}")
                 self.store_arg(a2, v2 << v1)
             elif instr.data == 'andq':
                 a1, a2 = instr.children
@@ -436,7 +436,7 @@ class X86Emulator:
                 a1, a2 = instr.children
                 v1 = self.eval_arg(a1)
                 v2 = self.eval_arg(a2)
-                trace(f"cmq {v1=} {v2=} {a1=} {a2=}")
+                # trace(f"cmq {v1=} {v2=} {a1=} {a2=}")
                 if v1 == v2:
                     self.registers['EFLAGS'] = 'e'
                 elif v2 < v1:

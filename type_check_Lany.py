@@ -6,6 +6,29 @@ import typing
 
 class TypeCheckLany(TypeCheckLlambda):
 
+  def check_type_equal(self, t1, t2, e):
+    if t1 == Bottom() or t2 == Bottom():
+      return
+    match t1:
+      case AnyType():
+        return
+      case FunctionType(ps1, rt1):
+        match t2:
+          case FunctionType(ps2, rt2):
+            for (p1, p2) in zip(ps1, ps2):
+              self.check_type_equal(p1, p2, e)
+              self.check_type_equal(rt1, rt2, e)
+          case _:
+            if isinstance(t2, AnyType):
+              # t2 was AnyType we can match any
+              return
+            raise Exception('error: ' + repr(t1) + ' != ' + repr(t2) \
+                            + ' in ' + repr(e))
+      case _:
+        if isinstance(t2, AnyType):
+          return
+        super().check_type_equal(t1, t2, e)
+
   def type_check_exp(self, e, env):
     match e:
       case Inject(value, typ):
@@ -64,6 +87,7 @@ class TypeCheckLany(TypeCheckLlambda):
           self.check_type_equal(env[v.id], t, value)
         else:
           env[v.id] = t
+
         v.has_type = env[v.id]
         return self.type_check_stmts(ss[1:], env)
       case Expr(Call(Name('print'), [arg])):
@@ -72,19 +96,31 @@ class TypeCheckLany(TypeCheckLlambda):
         return self.type_check_stmts(ss[1:], env)
       case _:
         return super().type_check_stmts(ss, env)
-  # def check_exp(self, e, ty, env):
-  #   match e:
-  #     case Call(Name('make_any'), [value, tag]):
-  #       pass
-  #     case Inject(value, typ):
-  #       pass
-  #     case Project(value, typ):
-  #       pass
-  #     case Call(Name('any_tuple_load'), [tup, index]):
-  #       pass
-  #     case _:
-  #       super().check_exp(e, ty, env)
-  #       return
+
+  def check_exp(self, e, ty, env):
+    match e:
+      case Lambda(params, body):
+        e.has_type = ty
+        if isinstance(params, ast.arguments):
+          new_params = [a.arg for a in params.args]
+          e.args = new_params
+        else:
+          new_params = params
+        match ty:
+          case FunctionType(params_t, return_t):
+            new_env = {x: t for (x, t) in env.items()}
+            for (p, t) in zip(new_params, params_t):
+              new_env[p] = t
+            self.check_exp(body, return_t, new_env)
+          case Bottom():
+            pass
+          case _:
+            raise Exception('lambda does not have type ' + str(ty))
+      case _:
+
+        t = self.type_check_exp(e, env)
+        trace("^^^^ {} {} {}".format(e, ty, t))
+        self.check_type_equal(t, ty, e)
 
   #   t = self.type_check_exp(e, env)
   #   self.check_type_equal(t, ty, e)
@@ -108,3 +144,75 @@ class TypeCheckLany(TypeCheckLlambda):
         self.check_stmts(body, AnyType(), env)
       case _:
         raise Exception('type_check: unexpected ' + repr(p))
+
+
+  def check_stmts(self, ss, return_ty, env):
+    if len(ss) == 0:
+      return
+    #trace('*** check_stmts ' + repr(ss[0]) + '\n')
+    match ss[0]:
+      case FunctionDef(name, params, body, dl, returns, comment):
+        #trace('*** tc_check ' + name)
+        new_env = {x: t for (x,t) in env.items()}
+        if isinstance(params, ast.arguments):
+            new_params = [(p.arg, self.parse_type_annot(p.annotation)) for p in params.args]
+            ss[0].args = new_params
+            new_returns = self.parse_type_annot(returns)
+            ss[0].returns = new_returns
+        else:
+            new_params = params
+            new_returns = returns
+        for (x,t) in new_params:
+            new_env[x] = t
+        rt = self.check_stmts(body, new_returns, new_env)
+        self.check_stmts(ss[1:], return_ty, env)
+      case Return(value):
+        #trace('** tc_check return ' + repr(value))
+        self.check_exp(value, return_ty, env)
+      case Assign([v], value) if isinstance(v, Name):
+        if v.id in env:
+          self.check_exp(value, env[v.id], env)
+        else:
+           #
+           t = self.type_check_exp(value, env)
+           # breakpoint()
+           trace("ggggg {} {} {} ".format(v.id, value, type(value), t))
+           # ggggg g.2 inject((lambda x.3: inject((project(x.3, int) - project(y.1, int)), int)), Callable[[any], any]) any
+           # so g.2 was AnyType
+           # but checkfunc has type FunctionType
+           # here we need real typ?
+           env[v.id] = t
+           # breakpoint()
+           if isinstance(value, Inject) and isinstance(value.typ, FunctionType):
+             print("ggggg value.typ ", value.typ)
+             env[v.id] = value.typ  #
+           elif isinstance(value, Call):
+             if isinstance(value.args[0], AnnLambda):
+               env[v.id] = value.args[0].convert_to_typ()# pass
+        v.has_type = env[v.id]
+        trace("xxxxx {} {}".format(return_ty, env))
+        trace(env)
+        self.check_stmts(ss[1:], return_ty, env)
+      case Assign([Subscript(tup, Constant(index), Store())], value):
+        tup_t = self.type_check_exp(tup, env)
+        match tup_t:
+          case TupleType(ts):
+            self.check_exp(value, ts[index], env)
+          case Bottom():
+            pass
+          case _:
+            raise Exception('check_stmts: expected a tuple, not ' \
+                            + repr(tup_t))
+        self.check_stmts(ss[1:], return_ty, env)
+      case AnnAssign(v, ty, value, simple) if isinstance(v, Name):
+        ty_annot = self.parse_type_annot(ty)
+        ss[0].annotation = ty_annot
+        if v.id in env:
+            self.check_type_equal(env[v.id], ty_annot)
+        else:
+            env[v.id] = ty_annot
+        v.has_type = env[v.id]
+        self.check_exp(value, ty_annot, env)
+        self.check_stmts(ss[1:], return_ty, env)
+      case _:
+        self.type_check_stmts(ss, env)

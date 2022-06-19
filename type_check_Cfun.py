@@ -82,7 +82,7 @@ class TypeCheckCfun(TypeCheckCtup):
             for l in reversed(sort_cfg):
                 ss = blocks[l]
                 # should handing by top_logic.......
-                trace("handing....... {}".format(l))
+                # trace("handing....... {}".format(l))
                 self.type_check_stmts(ss, new_env)
             # trace('type_check_Cfun iterating ' + repr(new_env))
             if new_env == old_env:

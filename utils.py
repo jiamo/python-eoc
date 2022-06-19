@@ -404,6 +404,9 @@ class AnnLambda(expr):
             ', '.join([x + ':' + str(t) for (x,t) in self.params]) + '] -> ' \
             + str(self.returns) + ': ' + str(self.body)
 
+    def convert_to_typ(self):
+        return FunctionType([i[1] for i in self.params], self.returns)
+
 # An uninitialized value of a given type.
 # Needed for boxing local variables.
 @dataclass
