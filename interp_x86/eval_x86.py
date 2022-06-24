@@ -285,7 +285,7 @@ class X86Emulator:
             elif instr.data == 'xorq':
                 a1, a2 = instr.children
                 v1 = self.eval_arg(a1)
-                v2 = self.eval_arg(a2)
+                v2 = self.eval_arg(a2)  or 0
                 self.store_arg(a2, v1 ^ v2)
             elif instr.data == 'sarq':
                 a1, a2 = instr.children

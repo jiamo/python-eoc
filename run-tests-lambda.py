@@ -70,10 +70,16 @@ if len(sys.argv) == 2:
                  interp_dict,
                  )
 else:
-    run_tests('cond', compiler, 'cond',
+    run_tests('lambda', the_compiler, 'lambda',
               # type_check_Pvar.TypeCheckPvar().type_check_P,
               type_check_dict,
               # interp_Pvar.InterpPvar().interp_P,
               interp_dict,
               )
+    # run_tests('cond', the_compiler, 'cond',
+    #           # type_check_Pvar.TypeCheckPvar().type_check_P,
+    #           type_check_dict,
+    #           # interp_Pvar.InterpPvar().interp_P,
+    #           interp_dict,
+    #           )
 

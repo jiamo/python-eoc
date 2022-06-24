@@ -204,12 +204,14 @@ class Deref(arg):
     def __hash__(self):
         return hash((self.reg, self.offset))
 
+from sys import platform
+
 class Global(arg):
     __match_args__ = ("name",)
     def __init__(self, name):
         self.name = name
     def __str__(self):
-        return '_' + str(self.name) + "(%rip)"
+        return '_' if platform == "darwin"  else '' + str(self.name) + "(%rip)"
     def __repr__(self):
         return 'Global(' + repr(self.name) + ')'
     

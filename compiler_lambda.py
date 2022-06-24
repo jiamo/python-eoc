@@ -812,7 +812,6 @@ class Compiler:
 
         r = Module(result)
         trace(r)
-        sys.exit()
         return r
 
 
