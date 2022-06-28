@@ -211,7 +211,7 @@ class Global(arg):
     def __init__(self, name):
         self.name = name
     def __str__(self):
-        return '_' if platform == "darwin"  else '' + str(self.name) + "(%rip)"
+        return ('_' if platform == "darwin"  else '') + str(self.name) + "(%rip)"
     def __repr__(self):
         return 'Global(' + repr(self.name) + ')'
     
