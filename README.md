@@ -1,4 +1,4 @@
-#python-student-support-code
+## python-student-support-code
 
 Support code for students (Python version).
 
@@ -10,8 +10,8 @@ This will produce a file named `runtime.o`. The -g flag is to tell the
 compiler to produce debug information that you may need to use
 the gdb (or lldb) debugger.
 
-## https://github.com/IUCompilerCourse/IU-Fall-2021
-
+## follow the book
+    https://github.com/IUCompilerCourse/IU-Fall-2021
 
 ## example one chapter for one chapter
 
@@ -20,5 +20,10 @@ the gdb (or lldb) debugger.
     python run-tests-lambda.py tests/lambda/add1.py
     python run-tests-lambda.py tests/lambda/add2.py
 
-##  example the higher chapter should work on low test
+##  higher chapter should work on low test 
     python run-tests-lambda.py tests/func/add.py
+    # ( but dyn is not higher than lambda TODO check)
+
+## TODO
+    1. optimse
+    2. do the challenge exercises in the book

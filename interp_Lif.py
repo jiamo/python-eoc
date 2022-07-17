@@ -46,13 +46,7 @@ class InterpLif(InterpLvar):
       case Compare(left, [cmp], [right]):
         l = self.interp_exp(left, env)
         r = self.interp_exp(right, env)
-        trace(f"{left= }{l=} check {r=} {right=}")
         return self.interp_cmp(cmp)(l, r)
-      # case Let(Name(x), rhs, body):
-      #   v = self.interp_exp(rhs, env)
-      #   new_env = dict(env)
-      #   new_env[x] = v
-      #   return self.interp_exp(body, new_env)
       case Begin(ss, e):
         self.interp_stmts(ss, env)
         return self.interp_exp(e, env)
@@ -64,11 +58,14 @@ class InterpLif(InterpLvar):
       return
     match ss[0]:
       case If(test, body, orelse):
-        match self.interp_exp(test, env):
+        vtest = self.interp_exp(test, env)
+        match vtest:
           case True:
             return self.interp_stmts(body + ss[1:], env)
           case False:
             return self.interp_stmts(orelse + ss[1:], env)
+          case _:
+            raise Exception
       case _:
         return super().interp_stmts(ss, env)
     

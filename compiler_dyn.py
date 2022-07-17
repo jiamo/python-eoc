@@ -25,7 +25,10 @@ import type_check_Llambda
 import type_check_Lany
 import type_check_Clambda
 import type_check_Cany
+import sys
 
+# the interpreter need such big size
+sys.setrecursionlimit(3000)
 
 Binding = Tupling[Name, expr]
 Temporaries = List[Binding]
@@ -154,7 +157,6 @@ class Compiler:
     def shrink(self, p: Module) -> Module:
         # YOUR CODE HERE
         # type_check_Llambda.TypeCheckLlambda().type_check(p)
-        trace(p)
         result = []
         # breakpoint()
         main_stmts = []
@@ -380,7 +382,6 @@ class Compiler:
 
     def reveal_functions(self, p: Module) -> Module:
         # YOUR CODE HERE
-        trace(p)
         result = []
         self.func_map = {}
         match p:
@@ -608,6 +609,7 @@ class Compiler:
                 return Assign(stmt.targets, v_expr)
             case If(test, body, orelse):
                 test_expr = self.cast_insert_exp(test)
+                test_expr = Project(test_expr, BoolType())
                 body_stmts = []
                 for s in body:
                     body_stmts.append(self.cast_insert_stmt(s))
@@ -617,6 +619,7 @@ class Compiler:
                 return If(test_expr, body_stmts, orelse_stmts)
             case While(test, body, []):
                 test_expr = self.cast_insert_exp(test)
+                test_expr = Project(test_expr, BoolType())
                 body_stmts = []
                 for s in body:
                     body_stmts.append(self.cast_insert_stmt(s))
@@ -630,7 +633,6 @@ class Compiler:
 
     def cast_insert(self, p):
         # YOUR CODE HERE
-        trace(p)
         result = []
         match p:
             case Module(body):
@@ -714,7 +716,6 @@ class Compiler:
             case Constant(v):
                 return e
             case Name(id):
-                # print(".... ", sym_map)
                 return e
             case BinOp(left, op, right):
                 left = self.reveal_casts_exp(left)
@@ -787,7 +788,6 @@ class Compiler:
 
     def reveal_casts(self, p):
         # YOUR CODE HERE
-        trace(p)
         result = []
         match p:
             case Module(body):
@@ -964,11 +964,8 @@ class Compiler:
 
     def convert_to_closures_exp(self, e):
         match e:
-            # case Call(Name('input_int'), []):
             case Call(Name(x), cargs) if x == 'make_any' and isinstance(cargs[0], AnnLambda):
-                # breakpoint()
                 f = self.convert_to_closures_exp(cargs[0])
-
                 r = Call(Name(x), [f, Constant(tagof(f.closure_type))])
                 r.my_extra_type = f.closure_type
                 return r
@@ -982,20 +979,15 @@ class Compiler:
                     closure_type = None
                     new_tag_type = self.convert_to_closures_exp(cargs[1])
                 r = Call(Name(x), [f, new_tag_type])
-                print("make_any  FunRef", cargs,  closure_type)
-                r.my_extra_type = closure_type  # type 需要传递
+                r.my_extra_type = closure_type
                 return r
             case Call(Name(x), args):
                 args = [self.convert_to_closures_exp(i) for i in args]
-                # breakpoint()
                 ne = Call(Name(x), args)
                 if x == 'make_any':
                     ne.my_extra_type = AnyType()
                 return ne
             case FunRef(name, n):
-                # c = Closure(n, [FunRef(name, n)])
-                # print("... name is {}".format(name))
-                # breakpoint()
                 if name in self.top_funs:
                     # breakpoint()
                     c = Closure(n, [FunRef(name, n)])
@@ -1003,28 +995,20 @@ class Compiler:
                     c = Name(name)
                 return c
             case Call(x, args):
-                # breakpoint()
                 args = [self.convert_to_closures_exp(i) for i in args]
 
                 c = self.convert_to_closures_exp(x)
                 tmp = generate_name("clos")
-                # breakpoint()
-                 # after call the value type should be update as the call return type
                 ne = Begin(
                     [Assign([Name(tmp)], c)],
                     Call(Subscript(Name(tmp), Constant(0), Load()), [Name(tmp), *args])
                 )
-                # breakpoint()
-                # now c.my_extra_type must be tuple
-                # if isinstance(c.my_extra_type, AnyType):
-                #     breakpoint()
                 if isinstance(c.my_extra_type, AnyType):
-                    # breakpoint()
                     ne.my_extra_type = AnyType()
                 else:
+                    # print(c)
                     # breakpoint()
-                    print("calling ", tmp, c.my_extra_type.types[0].ret_type )
-                    ne.my_extra_type = c.my_extra_type.types[0].ret_type  # x's  my_extra_type is not x()'s my_extra_type
+                    ne.my_extra_type = c.my_extra_type.types[0].ret_type
                 return ne
             case Begin(stmts, exp):
                 stmts = [self.convert_to_closures_stmt(i) for i in stmts]
@@ -1038,40 +1022,24 @@ class Compiler:
 
             case ValueOf(value, typ):
                 value = self.convert_to_closures_exp(value)
+
                 if isinstance(value, Name) and value.id in self.func_val_real_types:
                     if isinstance(self.func_val_real_types[value.id], TupleType):
                         typ = self.func_val_real_types[value.id]
 
-                # bool cam't change
-                # print("ValueOf ", value, value.my_extra_type)
+                # but the return typ is function should be update too
                 ne = ValueOf(value, typ)
                 ne.my_extra_type = typ
                 return ne
-
             case Constant(v):
-                # we need change callable to
-                # match v:
-                #     case TagOf(FunctionType(args_types, AnyType())):
-                #         # change to ClosureType
-                #         # how can I know this function free_types is what?
-                #         # It is wrong
-                #         closureTy = TupleType(
-                #             [FunctionType(args_types, AnyType())]
-                #         )
-                #         return TagOf(closureTy)
                 return e
 
             case Name(id):
-                # breakpoint()
                 e.my_extra_type = self.func_val_real_types[id]
 
                 if id not in self.box_dict:
-                    print("id is .... {} {} {}".format(id, self.top_funs, self.func_val_real_types))
-                    # if isinstance(id, )
                     if id in self.top_funs:
-                        # pass
                         funref = self.func_map[id]
-
                         ne = Closure(funref.arity, [funref])
                         ne.my_extra_type = self.func_val_real_types[id]
                         return ne
@@ -1079,13 +1047,10 @@ class Compiler:
                 else:
                     return Subscript(Name(self.box_dict[id]), Constant(0), Load())
             case BinOp(left, op, right):
-                # breakpoint()
                 left = self.convert_to_closures_exp( left)
-                # breakpoint()
                 right = self.convert_to_closures_exp( right)
                 return BinOp(left, op, right)
             case UnaryOp(op, v):
-                # one by one
                 v = self.convert_to_closures_exp(v)
                 return UnaryOp(op, v)
 
@@ -1152,6 +1117,7 @@ class Compiler:
 
                 # The return type was
                 closureTy = TupleType([FunctionType([i[1] for i in lambda_parms], returns), *free_types])
+                self.func_val_real_types[name] = closureTy
                 c = Closure(n, [FunRef(name, n), *free_named_vars])  # save the free_named_vars into the cloure
                 c.closure_type = closureTy
                 c.my_extra_type = closureTy
@@ -1179,17 +1145,10 @@ class Compiler:
                 for i, v in enumerate(free_named_vars):
                     stmts.append(Assign([v], Subscript(Name(fsv_name), Constant(i+1), Load())))
 
-                # breakpoint()
-                # TODO may be we need just trust the Annlambda
-                # returns = self.tmp_ann_typ.ret_type
-
                 # May be the return was function type again and need to convertion to closure type TODO
                 lambda_def = FunctionDef(name, lambda_parms, stmts + [Return(body)], None, returns, None)
                 self.lambda_convert_defs.append(lambda_def)
 
-                # The return type was
-                # but I don't know its real free_types in
-                # 好像不需要 *free_types
                 closureTy = TupleType(
                     [FunctionType([i[1] for i in lambda_parms], returns)]
                 )
@@ -1278,6 +1237,12 @@ class Compiler:
                             for i,t in args:
                                 # breakpoint()
                                 self.func_val_real_types[i] = t
+
+                            # it is anytype
+                            # we recusive func need to be update at first
+                            # for stmt need ref recursive func. we update first (first A)
+                            self.func_val_real_types[x] = TupleType([FunctionType([i[1] for i in args], AnyType())])
+
                             stmts = [self.convert_to_closures_stmt(i) for i in stmts]
                             if x != "main":
                                 tmp = generate_name('fvs')
@@ -1285,32 +1250,28 @@ class Compiler:
                             # breakpoint()
                             return_value = self.find_last_stmt_return(stmts[-1])
 
-
                             # if isinstance(return_value, Name) and return_value in self.lambda_exp:
                             #     # pass
                             #     returns = self.lambda_exp[stmts[-1].value].closure_type
                             # change to my_extra_type
 
                             # breakpoint()
+                            # but if function return f . we need update the return types again
+                            # what about if the (first  A) was used?
+                            # TODO do we need re update again
                             returns = return_value.my_extra_type
-
-                            # we keep real type in here
-
                             self.func_val_real_types[x] = TupleType([FunctionType([i[1] for i in args], returns)])
 
-
+                            # we keep real type in here
                             # but return still return Any?????
                             result.append(FunctionDef(x, args, stmts, dl, AnyType(), comment))
             case _:
                 raise Exception('convert_to_closures: unexpected ' + repr(p))
         # breakpoint()
         result = self.lambda_convert_defs + result
-        trace(result)
         r = Module(result)
         trace(r)
-        # breakpoint()
         type_check_Lany.TypeCheckLany().type_check(r)
-        # sys.exit()
         return r
 
     def limit_functions_exp(self, e, func_arg_map, args_map):
@@ -1339,7 +1300,6 @@ class Compiler:
                 else:
                     return e
             case BinOp(left, op, right):
-                print(left, op, right)
                 l_expr = self.limit_functions_exp(left, func_arg_map, args_map)
                 r_expr = self.limit_functions_exp(right, func_arg_map, args_map)
                 return_expr = BinOp(l_expr, op, r_expr)
@@ -1419,13 +1379,10 @@ class Compiler:
 
     def limit_functions(self, p: Module) -> Module:
         # YOUR CODE HERE
-        trace(p)
         result = []
         func_args_map = {}
         match p:
             case Module(body):
-                print(body)
-                # breakpoint()
                 for s in body:
                     match s:
                         case FunctionDef(x, args, stmts, dl, returns, comment):
@@ -1435,11 +1392,8 @@ class Compiler:
 
                             # change returns
                             if len(args) > 6:
-
-                                pass
                                 for i in range(5):
                                     new_args.append(args[i])
-                                print("... ", i)
                                 # breakpoint()
                                 new_args_map = {}
                                 tuple_args = []
@@ -1653,8 +1607,6 @@ class Compiler:
         # return result
 
     def expose_allocation(self, p):
-        # YOUR CODE HERE
-        trace(p)
         type_check_Lany.TypeCheckLany().type_check(p)
         result = []
         match p:
@@ -1682,7 +1634,6 @@ class Compiler:
             case Name(id):
                 return e, []
             case BinOp(left, op, right):
-                print(left, op, right)
                 l_expr, l_tmps = self.rco_exp(left, True)
                 r_expr, r_tmps = self.rco_exp(right, True)
                 l_tmps.extend(r_tmps)
@@ -1696,7 +1647,6 @@ class Compiler:
             case UnaryOp(op, v):
                 # one by one
                 v_expr, v_tmps = self.rco_exp(v, True)
-                print(v_expr, v_tmps)
                 return_expr = UnaryOp(op, v_expr)
                 if need_atomic:
                     tmp = Name(generate_name("tmp"))
@@ -1843,13 +1793,11 @@ class Compiler:
                 result.append(Expr(Call(Name('print'), [arg_expr])))
             case Expr(value):
                 expr, tmps = self.rco_exp(value, False)
-                print(expr, tmps)
                 for name, expr in tmps:
                     result.append(Assign([name], expr))
                 result.append(Expr(expr))
             case Assign([lhs], value):
                 v_expr, tmps = self.rco_exp(value, False)
-                print(v_expr, tmps)
                 for name, t_expr in tmps:
                     result.append(Assign([name], t_expr))
                 result.append(Assign([lhs], v_expr))
@@ -1875,8 +1823,6 @@ class Compiler:
             case Collect(size):
                 result.append(s)
             case Return(value):
-                # the tail call need the it to be false
-                # 为了调试可以先不这样
                 self.optimse_tail = True
                 value_expr, value_tmps = self.rco_exp(value, True)
                 for name, t_expr in value_tmps:
@@ -1887,15 +1833,11 @@ class Compiler:
         return result
 
     def remove_complex_operands(self, p: Module) -> Module:
-        # YOUR CODE HERE
-        trace(p)
         type_check_Lany.TypeCheckLany().type_check(p)
         result = []
         match p:
             case Module(body):
-                # breakpoint()
                 for s in body:
-                    # breakpoint()
                     match s:
                         case FunctionDef(fun, args, stmts, dl, returns, comment):
                             new_stmts = []
@@ -1906,7 +1848,6 @@ class Compiler:
             case _:
                 raise Exception('interp: unexpected ' + repr(p))
 
-        # breakpoint()
         type_check_Lany.TypeCheckLany().type_check(p)
         trace(result)
         return result
@@ -1916,22 +1857,15 @@ class Compiler:
                          basic_blocks: Dict[str, List[stmt]]) -> List[stmt]:
         match rhs:
             case IfExp(test, body, orelse):
-                # breakpoint()
-                # if lhs == Name("tmp.49"):
-                #     breakpoint()
                 goto_cont = create_block(cont, basic_blocks)
                 body_list = self.explicate_assign(body, lhs, [goto_cont], basic_blocks)
                 orelse_list = self.explicate_assign(orelse, lhs, [goto_cont], basic_blocks)
                 return self.explicate_pred(test, body_list, orelse_list, basic_blocks)
 
             case Begin(body, result):
-                # return self.explicate_assign(rhs, lhs, cont, basic_blocks)
-
-                # new_body = [Assign([lhs], result)] + cont
                 new_body = self.explicate_assign(result, lhs, cont, basic_blocks)
 
                 for s in reversed(body):
-                    # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
             case _:
@@ -1948,16 +1882,13 @@ class Compiler:
                 orelse = self.explicate_effect(orelse, [goto_cont], basic_blocks)
                 return self.explicate_pred(test, body, orelse, basic_blocks)
             case Call(func, args):
-                print("#####", e)
                 return [Expr(e)] + cont
             case Begin(body, result):
                 new_body = self.explicate_effect(result, cont, basic_blocks) + [cont]
                 for s in reversed(body):
-                    # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
             case _:
-                # print("......", e)
                 return [] + cont
 
     def explicate_pred(self, cnd: expr, thn: List[stmt], els: List[stmt],
@@ -1966,16 +1897,12 @@ class Compiler:
             case Compare(left, [op], [right]):
                 goto_thn = create_block(thn, basic_blocks)
                 goto_els = create_block(els, basic_blocks)
-                # breakpoint()
-                # print("xxxxxxxxxx")
                 return [If(cnd, [goto_thn], [goto_els])]
             case Constant(True):
                 return thn
             case Constant(False):
                 return els
             case IfExp(test, body, orelse):
-                # TODO
-
                 goto_thn = create_block(thn, basic_blocks)
                 goto_els = create_block(els, basic_blocks)
                 body = self.explicate_pred(body, [goto_thn], [goto_els], basic_blocks)
@@ -1989,7 +1916,6 @@ class Compiler:
                 goto_els = create_block(els, basic_blocks)
                 new_body = [If(result, [goto_thn], [goto_els])]
                 for s in reversed(body):
-                    # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
             case _:
@@ -1997,12 +1923,12 @@ class Compiler:
                         [create_block(els, basic_blocks)],
                         [create_block(thn, basic_blocks)])]
 
-    def explicate_tail(self, exp, basic_blocks) ->  List[stmt]:
+    def explicate_tail(self, exp, basic_blocks) -> List[stmt]:
         match exp:
-            case Call(Name('make_any'), args):
+            # while make_any exit need to be return??
+            case Call(Name(x), args) if x in ["make_any", "exit"]:
                 return [Return(exp)]
             case Call(fun, args):
-                # breakpoint()
                 return [Return(TailCall(fun, args))]
             case Begin(body, result):
                 the_result_stmts = self.explicate_tail(result, basic_blocks)
@@ -2010,17 +1936,12 @@ class Compiler:
                     the_result_stmts = self.explicate_stmt(s, the_result_stmts, basic_blocks)
                 return the_result_stmts
             case IfExp(test, body, orelse):
-                # TODO
-                # Return
-                # goto_thn = create_block(thn, basic_blocks)
-                # goto_els = create_block(els, basic_blocks)
                 body = self.explicate_tail(body, basic_blocks)
                 orelse = self.explicate_tail(orelse, basic_blocks)
                 goto_thn_out = create_block(body, basic_blocks)
                 goto_els_out = create_block(orelse, basic_blocks)
                 return [If(test, [goto_thn_out], [goto_els_out])]
             case _:
-                # breakpoint()
                 return [Return(exp)]
 
     def explicate_stmt(self, s: stmt, cont: List[stmt],
@@ -2034,33 +1955,25 @@ class Compiler:
                 goto_cont = create_block(cont, basic_blocks)
                 new_body = [goto_cont]
                 for s in reversed(body):
-                    # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
 
                 new_orelse = [goto_cont]
                 for s in reversed(orelse):
-                    # the new_body was after s we need do the new_body
                     new_orelse = self.explicate_stmt(s, new_orelse, basic_blocks)
 
                 return self.explicate_pred(test, new_body, new_orelse, basic_blocks)
             case While(test, body, []):
-                # after_while = create_block(cont, basic_blocks)
-                # goto_after_while = [after_while]
                 test_label = label_name(generate_name('block'))
                 new_body = [Goto(test_label)]
                 for s in reversed(body):
-                    # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
-                test_stmts =  self.explicate_pred(test, new_body, cont, basic_blocks)
+                test_stmts = self.explicate_pred(test, new_body, cont, basic_blocks)
                 basic_blocks[test_label] = test_stmts
                 return [Goto(test_label)]
             case Collect(size):
                 return [s] + cont
             case Return(value):
-                # return always the last
                 return self.explicate_tail(value, basic_blocks)
-            # case Expr(Call(Name('print'), [arg])):
-            #     return [s] + cont
 
     def explicate_control(self, p):
         result = []
@@ -2074,19 +1987,11 @@ class Compiler:
 
                             basic_blocks = {}
                             conclusion = []
-                            conclusion.extend([
-                                #Return(Constant(0)),
-                            ])
+                            conclusion.extend([])
                             basic_blocks[label_name("{}conclusion".format(fun))] = conclusion
 
-                            # blocks[self.sort_cfg[-1]][-1] = Jump(label_name("conclusion"))
                             new_body = [Goto(label_name("{}conclusion".format(fun)))]
-                            # 也许这里是一个 newblock conclude = block(Return(Constant(0))])
-                            # create_block 是 goto 那个 bloc
-                            # conclude 这里是从那里 goto 到这里
-
                             for s in reversed(stmts):
-                                # the new_body was after s we need do the new_body
                                 new_body = self.explicate_stmt(s, new_body, basic_blocks)
                             basic_blocks[label_name('{}start'.format(fun))] = new_body
                             result.append(FunctionDef(fun, args, basic_blocks, dl, returns, comment))

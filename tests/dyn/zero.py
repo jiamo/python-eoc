@@ -1,4 +1,4 @@
-def tail_sum(n:int, s:int) -> int:
+def tail_sum(n, s):
     if n == 0:
         return s
     else:

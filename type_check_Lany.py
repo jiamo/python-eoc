@@ -119,7 +119,6 @@ class TypeCheckLany(TypeCheckLlambda):
       case _:
 
         t = self.type_check_exp(e, env)
-        trace("^^^^ {} {} {}".format(e, ty, t))
         self.check_type_equal(t, ty, e)
 
   #   t = self.type_check_exp(e, env)
@@ -173,25 +172,15 @@ class TypeCheckLany(TypeCheckLlambda):
         if v.id in env:
           self.check_exp(value, env[v.id], env)
         else:
-           #
            t = self.type_check_exp(value, env)
-           # breakpoint()
-           trace("ggggg {} {} {} ".format(v.id, value, type(value), t))
-           # ggggg g.2 inject((lambda x.3: inject((project(x.3, int) - project(y.1, int)), int)), Callable[[any], any]) any
-           # so g.2 was AnyType
-           # but checkfunc has type FunctionType
-           # here we need real typ?
            env[v.id] = t
-           # breakpoint()
            if isinstance(value, Inject) and isinstance(value.typ, FunctionType):
-             print("ggggg value.typ ", value.typ)
              env[v.id] = value.typ  #
            elif isinstance(value, Call):
              if isinstance(value.args[0], AnnLambda):
                env[v.id] = value.args[0].convert_to_typ()# pass
         v.has_type = env[v.id]
-        trace("xxxxx {} {}".format(return_ty, env))
-        trace(env)
+        # trace(env)
         self.check_stmts(ss[1:], return_ty, env)
       case Assign([Subscript(tup, Constant(index), Store())], value):
         tup_t = self.type_check_exp(tup, env)

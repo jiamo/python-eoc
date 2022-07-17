@@ -68,7 +68,7 @@ if len(sys.argv) == 2:
                  interp_dict,
                  )
 else:
-    run_tests('cond', compiler, 'cond',
+    run_tests('dyn', compiler, 'dyn',
               # type_check_Pvar.TypeCheckPvar().type_check_P,
               type_check_dict,
               # interp_Pvar.InterpPvar().interp_P,

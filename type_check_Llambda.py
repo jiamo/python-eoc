@@ -77,7 +77,6 @@ class TypeCheckLlambda(TypeCheckLfun):
       case _:
 
         t = self.type_check_exp(e, env)
-        trace("^^^^ {} {} {}".format(e, ty, t))
         self.check_type_equal(t, ty, e)
 
   def check_stmts(self, ss, return_ty, env):
@@ -108,15 +107,8 @@ class TypeCheckLlambda(TypeCheckLfun):
           self.check_exp(value, env[v.id], env)
         else:
            t = self.type_check_exp(value, env)
-           # breakpoint()
-           trace("ggggg {} {} {} ".format(v.id, value, type(value), t))
-           # ggggg g.2 inject((lambda x.3: inject((project(x.3, int) - project(y.1, int)), int)), Callable[[any], any]) any
-           # so g.2 was AnyType
-           # but checkfunc has type FunctionType
-
            env[v.id] = t
         v.has_type = env[v.id]
-        trace("xxxxx {}".format(return_ty))
         trace(env)
         self.check_stmts(ss[1:], return_ty, env)
       case Assign([Subscript(tup, Constant(index), Store())], value):

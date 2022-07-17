@@ -137,8 +137,6 @@ class Compiler:
         main_stmts = []
         match p:
             case Module(body):
-                print(body)
-
                 for s in body:
                     match s:
                         case FunctionDef(name, args, stmts, dl, returns, comment):
@@ -296,7 +294,6 @@ class Compiler:
                             result.append(s)
             case _:
                 raise Exception('uniquify: unexpected ' + repr(p))
-        print(result)
         return Module(result)
 
 
@@ -363,7 +360,6 @@ class Compiler:
         self.func_map = {}
         match p:
             case Module(body):
-                print(body)
                 # breakpoint()
                 for s in body:
                     match s:
@@ -377,7 +373,6 @@ class Compiler:
         result = []
         match p:
             case Module(body):
-                print(body)
                 # breakpoint()
                 for s in body:
                     match s:
@@ -989,8 +984,6 @@ class Compiler:
                     raise Exception('limit_functions: unexpected ' + repr(s))
 
 
-        # breakpoint()
-        trace("limit function {}".format(new_result))
         return Module(new_result)
 
     def expose_allocation_exp(self, exp) -> Tupling[expr, List[stmt]]:
@@ -1413,16 +1406,13 @@ class Compiler:
                 orelse = self.explicate_effect(orelse, [goto_cont], basic_blocks)
                 return self.explicate_pred(test, body, orelse, basic_blocks)
             case Call(func, args):
-                print("#####", e)
                 return [Expr(e)] + cont
             case Begin(body, result):
                 new_body = self.explicate_effect(result, cont, basic_blocks) + [cont]
                 for s in reversed(body):
-                    # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
             case _:
-
                 return [] + cont
 
     def explicate_pred(self, cnd: expr, thn: List[stmt], els: List[stmt],
@@ -1431,16 +1421,12 @@ class Compiler:
             case Compare(left, [op], [right]):
                 goto_thn = create_block(thn, basic_blocks)
                 goto_els = create_block(els, basic_blocks)
-                # breakpoint()
-                # print("xxxxxxxxxx")
                 return [If(cnd, [goto_thn], [goto_els])]
             case Constant(True):
                 return thn
             case Constant(False):
                 return els
             case IfExp(test, body, orelse):
-                # TODO
-
                 goto_thn = create_block(thn, basic_blocks)
                 goto_els = create_block(els, basic_blocks)
                 body = self.explicate_pred(body, [goto_thn], [goto_els], basic_blocks)
@@ -1454,7 +1440,6 @@ class Compiler:
                 goto_els = create_block(els, basic_blocks)
                 new_body = [If(result, [goto_thn], [goto_els])]
                 for s in reversed(body):
-                    # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
             case _:
@@ -1465,7 +1450,6 @@ class Compiler:
     def explicate_tail(self, exp, basic_blocks) ->  List[stmt]:
         match exp:
             case Call(fun, args):
-                # breakpoint()
                 return [Return(TailCall(fun, args))]
             case Begin(body, result):
                 the_result_stmts = self.explicate_tail(result, basic_blocks)
@@ -1473,17 +1457,12 @@ class Compiler:
                     the_result_stmts = self.explicate_stmt(s, the_result_stmts, basic_blocks)
                 return the_result_stmts
             case IfExp(test, body, orelse):
-                # TODO
-                # Return
-                # goto_thn = create_block(thn, basic_blocks)
-                # goto_els = create_block(els, basic_blocks)
                 body = self.explicate_tail(body, basic_blocks)
                 orelse = self.explicate_tail(orelse, basic_blocks)
                 goto_thn_out = create_block(body, basic_blocks)
                 goto_els_out = create_block(orelse, basic_blocks)
                 return [If(test, [goto_thn_out], [goto_els_out])]
             case _:
-                # breakpoint()
                 return [Return(exp)]
 
     def explicate_stmt(self, s: stmt, cont: List[stmt],
@@ -1497,33 +1476,25 @@ class Compiler:
                 goto_cont = create_block(cont, basic_blocks)
                 new_body = [goto_cont]
                 for s in reversed(body):
-                    # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
 
                 new_orelse = [goto_cont]
                 for s in reversed(orelse):
-                    # the new_body was after s we need do the new_body
                     new_orelse = self.explicate_stmt(s, new_orelse, basic_blocks)
 
                 return self.explicate_pred(test, new_body, new_orelse, basic_blocks)
             case While(test, body, []):
-                # after_while = create_block(cont, basic_blocks)
-                # goto_after_while = [after_while]
                 test_label = label_name(generate_name('block'))
                 new_body = [Goto(test_label)]
                 for s in reversed(body):
-                    # the new_body was after s we need do the new_body
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
-                test_stmts =  self.explicate_pred(test, new_body, cont, basic_blocks)
+                test_stmts = self.explicate_pred(test, new_body, cont, basic_blocks)
                 basic_blocks[test_label] = test_stmts
                 return [Goto(test_label)]
             case Collect(size):
                 return [s] + cont
             case Return(value):
-                # return always the last
                 return self.explicate_tail(value, basic_blocks)
-            # case Expr(Call(Name('print'), [arg])):
-            #     return [s] + cont
 
     def explicate_control(self, p):
         result = []
@@ -1537,17 +1508,9 @@ class Compiler:
 
                             basic_blocks = {}
                             conclusion = []
-                            conclusion.extend([
-                                #Return(Constant(0)),
-                            ])
+                            conclusion.extend([])
                             basic_blocks[label_name("{}conclusion".format(fun))] = conclusion
-
-                            # blocks[self.sort_cfg[-1]][-1] = Jump(label_name("conclusion"))
                             new_body = [Goto(label_name("{}conclusion".format(fun)))]
-                            # 也许这里是一个 newblock conclude = block(Return(Constant(0))])
-                            # create_block 是 goto 那个 bloc
-                            # conclude 这里是从那里 goto 到这里
-
                             for s in reversed(stmts):
                                 # the new_body was after s we need do the new_body
                                 new_body = self.explicate_stmt(s, new_body, basic_blocks)

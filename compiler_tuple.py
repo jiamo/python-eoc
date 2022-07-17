@@ -435,8 +435,6 @@ class Compiler:
             case Compare(left, [op], [right]):
                 goto_thn = create_block(thn, basic_blocks)
                 goto_els = create_block(els, basic_blocks)
-                # breakpoint()
-                print("xxxxxxxxxx")
                 return [If(cnd, [goto_thn], [goto_els])]
             case Constant(True):
                 return thn
